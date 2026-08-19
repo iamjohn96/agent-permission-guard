@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { AuditQueryService } from '../audit/query-service.js';
 import { SqliteAuditRecorder } from '../audit/recorder.js';
@@ -11,6 +12,8 @@ import { openAuditDatabase } from '../db/database.js';
 import { createGateway } from '../gateway/gateway.js';
 import { LivePolicyController } from '../policy/live-controller.js';
 import { serveStdioGateway } from '../transport/stdio-downstream.js';
+import { parseDoctorArguments, runDoctor } from './doctor.js';
+import { parseInitArguments, runInit } from './init.js';
 
 export type ProxyArguments = Readonly<{
   policyPath: string;
@@ -56,6 +59,20 @@ function usageError(): Error {
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
+  if (argv[0] === 'init') {
+    runInit(parseInitArguments(argv.slice(1)));
+    return;
+  }
+  if (argv[0] === 'doctor') {
+    const healthy = await runDoctor(parseDoctorArguments(argv.slice(1)));
+    if (!healthy) process.exitCode = 1;
+    return;
+  }
+  if (argv[0] === '--help' || argv[0] === '-h' || argv.length === 0) {
+    process.stdout.write(`${generalUsage()}\n`);
+    return;
+  }
+
   const parsed = parseProxyArguments(argv);
   const policies = new LivePolicyController(parsed.policyPath);
   const database = openAuditDatabase(parsed.auditDbPath);
@@ -120,12 +137,31 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   process.stdin.once('end', () => void close());
 }
 
+function generalUsage(): string {
+  return [
+    'Agent Permission Guard',
+    '',
+    'Usage:',
+    '  apg init [--directory <path>]',
+    '  apg doctor [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>] [-- <upstream-command> [args...]]',
+    '  apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] -- <upstream-command> [args...]',
+  ].join('\n');
+}
+
 function createMinimalEnvironment(): Record<string, string> {
   return process.env.PATH === undefined ? {} : { PATH: process.env.PATH };
 }
 
-const isEntryPoint = process.argv[1] !== undefined
-  && import.meta.url === pathToFileURL(process.argv[1]).href;
+export function isEntryPointPath(entryPath: string | undefined, moduleUrl: string): boolean {
+  if (entryPath === undefined) return false;
+  try {
+    return realpathSync(entryPath) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+const isEntryPoint = isEntryPointPath(process.argv[1], import.meta.url);
 
 if (isEntryPoint) {
   main().catch((error: unknown) => {

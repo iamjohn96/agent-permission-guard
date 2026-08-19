@@ -16,12 +16,18 @@ git clone https://github.com/iamjohn96/agent-permission-guard.git
 cd agent-permission-guard
 npm ci
 npm run build
-mkdir -p .apg
-cp apg.example.yaml .apg/policy.yaml
-chmod 600 .apg/policy.yaml
+node dist/src/cli/main.js init
 ```
 
-Start the proxy with a trusted upstream MCP server command:
+Check the local setup and a trusted upstream command without starting that command:
+
+```sh
+node dist/src/cli/main.js doctor -- node
+```
+
+`doctor` checks the supported Node.js version, policy syntax, audit database path, localhost dashboard port, and whether the optional upstream command is executable. It never runs the upstream command.
+
+Start the proxy with the trusted upstream MCP server command:
 
 ```sh
 node dist/src/cli/main.js proxy \
@@ -36,6 +42,8 @@ APG prints a tokenized localhost dashboard URL to stderr. Open that exact URL to
 ## Current milestone
 
 - Proxy `tools/list` from an upstream MCP server.
+- Initialize a private starter policy with `apg init` without overwriting existing policy files.
+- Diagnose the local runtime, policy, audit path, dashboard port, and upstream executable with `apg doctor` without executing the upstream command.
 - Forward allowed `tools/call` requests.
 - Stop denied calls before they reach the upstream server.
 - Support modern MCP `2026-07-28` and legacy `2025-11-25` clients through the official SDK.
@@ -66,7 +74,27 @@ npm test
 npm run build
 ```
 
+The normal test suite is fully local. A separate opt-in compatibility check uses pinned versions of the official Everything and Filesystem reference servers:
+
+```sh
+APG_REAL_MCP_E2E=1 npm test -- test/integration/official-servers.test.ts
+```
+
+That command allows `npx` to download and execute the two reviewed reference packages. Run it only in a disposable development environment after approving external package execution. The Filesystem server is restricted to a test-created temporary directory.
+
+The compatibility test pins the npm-published versions `@modelcontextprotocol/server-everything@2026.8.18` and `@modelcontextprotocol/server-filesystem@2026.7.10` rather than following `latest`.
+
 Only run upstream commands that you trust and have explicitly reviewed.
+
+The source-build examples use `node dist/src/cli/main.js`. After the package is published or installed as a CLI, use the shorter equivalents:
+
+```sh
+apg init
+apg doctor -- <upstream-command>
+apg proxy --policy ./.apg/policy.yaml --audit-db ./.apg/audit.sqlite -- <upstream-command> [args...]
+```
+
+`apg init` defaults to `./.apg` and accepts `--directory <path>`. It creates `policy.yaml` with private file permissions and refuses to overwrite an existing policy. The audit database is created only when the proxy first starts.
 
 After startup, APG prints a secure local dashboard URL to stderr. Open that exact URL to review pending requests. Its token is held only for the running process and the current browser session. Use `--dashboard-port 0` when the operating system should choose a free loopback port.
 
