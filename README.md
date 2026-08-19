@@ -7,9 +7,21 @@ Agent Permission Guard is an MCP gateway that sits between an MCP client and ser
 > [!WARNING]
 > Agent Permission Guard `0.1.x` is a developer alpha. Test policies with non-production tools and data before placing it in front of credentials, destructive actions, or irreversible external side effects.
 
+## Install
+
+Agent Permission Guard requires Node.js 24-26:
+
+```sh
+npm install --global agent-permission-guard
+apg init
+apg doctor -- node
+```
+
+`apg init` creates `./.apg/policy.yaml` without overwriting an existing policy. Review that policy before connecting an MCP server.
+
 ## Install from source
 
-The CLI is not published to the npm registry yet. Build it from a local checkout:
+To build the CLI from a local checkout instead:
 
 ```sh
 git clone https://github.com/iamjohn96/agent-permission-guard.git
