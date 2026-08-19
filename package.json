@@ -1,0 +1,61 @@
+{
+  "name": "agent-permission-guard",
+  "version": "0.1.0",
+  "description": "Firewall and audit layer for AI agents.",
+  "type": "module",
+  "main": "dist/src/cli/main.js",
+  "bin": {
+    "apg": "dist/src/cli/main.js"
+  },
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "files": [
+    "dist/src/",
+    "migrations/",
+    "web/",
+    "apg.example.yaml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamjohn96/agent-permission-guard.git"
+  },
+  "keywords": [
+    "ai-agent",
+    "mcp",
+    "security",
+    "firewall",
+    "audit",
+    "human-in-the-loop"
+  ],
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/iamjohn96/agent-permission-guard/issues"
+  },
+  "homepage": "https://github.com/iamjohn96/agent-permission-guard#readme",
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/core": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "better-sqlite3": "^13.0.3",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.3": true
+  }
+}

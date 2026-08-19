@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent Permission Guard</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="brand-mark" aria-hidden="true">APG</div>
+        <div>
+          <p class="eyebrow">LOCAL SECURITY GATEWAY</p>
+          <h1>Security control center</h1>
+          <p class="subtitle">Approve actions, inspect decisions, and manage enforcement policy.</p>
+        </div>
+        <div class="status"><span></span><strong id="connection">Connecting</strong></div>
+      </header>
+
+      <section class="summary" aria-label="Gateway summary">
+        <div><span>Pending</span><strong id="pending-count">0</strong></div>
+        <div><span>Recent calls</span><strong id="call-count">—</strong></div>
+        <div><span>Audit integrity</span><strong id="integrity">Checking</strong></div>
+      </section>
+
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button class="tab active" data-panel="approvals" type="button">Approvals</button>
+        <button class="tab" data-panel="audit" type="button">Audit history</button>
+        <button class="tab" data-panel="policy" type="button">Policy</button>
+      </nav>
+      <div id="error" class="error" role="alert" hidden></div>
+
+      <section class="panel active" id="panel-approvals">
+        <div class="section-heading">
+          <div><p class="eyebrow">HUMAN IN THE LOOP</p><h2>Requests awaiting review</h2></div>
+          <button class="secondary" id="refresh-approvals" type="button">Refresh</button>
+        </div>
+        <div id="queue" class="queue" aria-live="polite"></div>
+        <div id="approval-empty" class="empty"><div class="shield" aria-hidden="true">✓</div><h3>No pending requests</h3><p>Agent actions requiring approval will appear here.</p></div>
+      </section>
+
+      <section class="panel" id="panel-audit" hidden>
+        <div class="section-heading">
+          <div><p class="eyebrow">LOCAL AUDIT TRAIL</p><h2>Recent tool calls</h2></div>
+          <button class="secondary" id="refresh-audit" type="button">Refresh</button>
+        </div>
+        <div id="audit-list" class="audit-list" aria-live="polite"></div>
+        <div id="audit-empty" class="empty" hidden><h3>No recorded calls</h3><p>Tool decisions will appear here.</p></div>
+      </section>
+
+      <section class="panel" id="panel-policy" hidden>
+        <div class="section-heading">
+          <div><p class="eyebrow">ENFORCEMENT POLICY</p><h2>YAML policy editor</h2></div>
+          <button class="secondary" id="reload-policy" type="button">Reload</button>
+        </div>
+        <div class="policy-warning"><strong>Security-sensitive change.</strong> Valid changes apply to new tool calls immediately.</div>
+        <label class="editor-label" for="policy-source">Active policy</label>
+        <textarea id="policy-source" spellcheck="false" aria-describedby="policy-message"></textarea>
+        <div class="policy-footer">
+          <p id="policy-message">No unsaved changes.</p>
+          <button class="approve" id="save-policy" type="button">Validate and save</button>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

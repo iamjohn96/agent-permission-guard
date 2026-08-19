@@ -1,0 +1,46 @@
+version: 1
+
+defaults:
+  decision: ask
+  approval_ttl_seconds: 120
+  tool_timeout_seconds: 60
+
+rules:
+  - id: allow-safe-reads
+    priority: 100
+    description: Allow known local read-only tools.
+    match:
+      server: local-upstream
+      tools:
+        - read_file
+        - search_repository
+        - run_tests
+    decision: allow
+    risk_tags:
+      - local_read
+
+  - id: ask-writes
+    priority: 100
+    description: Require approval for local filesystem mutations.
+    match:
+      server: local-upstream
+      tools:
+        - write_file
+        - delete_file
+    decision: ask
+    risk_tags:
+      - local_write
+
+  - id: deny-critical-remote-actions
+    priority: 1000
+    description: Never allow destructive repository actions.
+    match:
+      server: "*"
+      tools:
+        - push_main
+        - delete_repository
+    decision: deny
+    risk_tags:
+      - destructive
+      - external_side_effect
+      - privileged_target

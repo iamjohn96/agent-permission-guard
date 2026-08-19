@@ -1,0 +1,15 @@
+version: 1
+defaults:
+  approval_ttl_seconds: 1
+  tool_timeout_seconds: 60
+rules:
+  - id: risky-allow-dangerous-write
+    priority: 100
+    match: { server: local-upstream, tools: [dangerous_write] }
+    decision: allow
+    risk_tags: [local_write, destructive]
+  - id: allow-fixture-observation
+    priority: 50
+    match: { server: local-upstream, tools: [get_dangerous_call_count] }
+    decision: allow
+    risk_tags: [local_read]

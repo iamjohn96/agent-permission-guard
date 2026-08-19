@@ -1,0 +1,15 @@
+version: 1
+
+defaults:
+  decision: ask
+  approval_ttl_seconds: 120
+  tool_timeout_seconds: 60
+
+rules:
+  - id: fixture-allow
+    priority: 100
+    match:
+      server: local-upstream
+      tools: ['*']
+    decision: allow
+    risk_tags: [local_read]
