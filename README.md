@@ -19,6 +19,8 @@ apg doctor -- node
 
 `apg init` creates `./.apg/policy.yaml` without overwriting an existing policy. Review that policy before connecting an MCP server.
 
+To place APG between Codex and a local STDIO MCP server, follow the [Codex connection guide](./docs/codex.md).
+
 ## Install from source
 
 To build the CLI from a local checkout instead:
@@ -158,6 +160,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting changes. Report suspe
 - The hash chain detects event-content changes, reordering, and interior deletion. It is not yet externally anchored or signed, so tail truncation or full database replacement requires a future external checkpoint to detect.
 - If a tool executes successfully and the post-execution outcome write then fails, the gateway cannot undo that external side effect. The durable pre-execution event still records that execution was released.
 - Node.js 24 LTS is the target runtime; development may also work on newer supported Node versions listed in `package.json`.
+- APG currently forwards only `PATH` to upstream processes. MCP servers that require environment credentials are not yet supported by the documented Codex setup.
 
 ## License
 

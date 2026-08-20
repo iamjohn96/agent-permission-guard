@@ -1,6 +1,6 @@
 {
   "name": "agent-permission-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Firewall and audit layer for AI agents.",
   "type": "module",
   "main": "dist/src/cli/main.js",
@@ -12,6 +12,7 @@
   },
   "files": [
     "dist/src/",
+    "docs/",
     "migrations/",
     "web/",
     "apg.example.yaml",
