@@ -43,7 +43,7 @@ describe('local approval service', () => {
 });
 
 describe('dashboard API security', () => {
-  it('requires exact origin and bearer token, then applies a one-time decision', async () => {
+  it('supports authenticated browser and native clients while rejecting foreign origins', async () => {
     const service = new LocalApprovalService();
     const token = 't'.repeat(43);
     const directory = mkdtempSync(join(tmpdir(), 'apg-dashboard-unit-'));
@@ -67,6 +67,15 @@ describe('dashboard API security', () => {
       });
       expect(unauthenticated.status).toBe(401);
 
+      const nativeUnauthenticated = await fetch(`${url.origin}/api/health`);
+      expect(nativeUnauthenticated.status).toBe(401);
+
+      const nativeHealth = await fetch(`${url.origin}/api/health`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(nativeHealth.status).toBe(200);
+      expect(await nativeHealth.json()).toEqual({ status: 'ok', api_version: 1 });
+
       const wrongOrigin = await fetch(`${url.origin}/api/approvals`, {
         headers: { Origin: 'https://malicious.example', Authorization: `Bearer ${token}` },
       });
@@ -74,7 +83,7 @@ describe('dashboard API security', () => {
 
       const approved = await fetch(`${url.origin}/api/approvals/${ticket.request.id}/approve`, {
         method: 'POST',
-        headers: { Origin: url.origin, Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       expect(approved.status).toBe(200);
       await expect(ticket.outcome).resolves.toBe('approved');

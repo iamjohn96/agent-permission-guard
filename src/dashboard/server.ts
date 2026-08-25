@@ -84,9 +84,14 @@ async function handleRequest(
   const url = new URL(request.url ?? '/', `http://${expectedHost}`);
   if (url.pathname.startsWith('/api/')) {
     const expectedOrigin = `http://${expectedHost}`;
-    if (request.headers.origin !== expectedOrigin) return sendJson(response, 403, { error: 'Invalid origin' });
+    if (!isAllowedOrigin(request.headers.origin, expectedOrigin)) {
+      return sendJson(response, 403, { error: 'Invalid origin' });
+    }
     if (!isAuthorized(request.headers.authorization, services.token)) return sendJson(response, 401, { error: 'Unauthorized' });
 
+    if (request.method === 'GET' && url.pathname === '/api/health') {
+      return sendJson(response, 200, { status: 'ok', api_version: 1 });
+    }
     if (request.method === 'GET' && url.pathname === '/api/approvals') {
       return sendJson(response, 200, { approvals: services.approvals.listPending() });
     }
@@ -207,6 +212,10 @@ function isAuthorized(header: string | undefined, expectedToken: string): boolea
   const received = Buffer.from(header.slice(7));
   const expected = Buffer.from(expectedToken);
   return received.length === expected.length && timingSafeEqual(received, expected);
+}
+
+function isAllowedOrigin(header: string | undefined, expectedOrigin: string): boolean {
+  return header === undefined || header === expectedOrigin;
 }
 
 function applySecurityHeaders(response: ServerResponse): void {

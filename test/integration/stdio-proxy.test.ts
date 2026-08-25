@@ -155,11 +155,40 @@ it('keeps stdout pure enough for an MCP client to connect and exchange messages'
   expect(textOf(result)).toBe('valid-jsonrpc');
 });
 
-it('creates and removes an opt-in dashboard state file', async () => {
+it('rotates an opt-in dashboard state file without an older process removing newer state', async () => {
   const statePath = join(testDirectory, `${randomUUID()}.dashboard.json`);
-  const client = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
+  const firstClient = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
   await waitForStateCreation(statePath);
-  const state = JSON.parse(readFileSync(statePath, 'utf8')) as {
+  const firstState = readDashboardState(statePath);
+
+  const secondClient = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
+  await waitForStateChange(statePath, firstState.url);
+  const state = readDashboardState(statePath);
+
+  expect(state.url).not.toBe(firstState.url);
+  const stateUrl = new URL(state.url);
+  const stateToken = new URLSearchParams(stateUrl.hash.slice(1)).get('token');
+  const health = await fetch(`${stateUrl.origin}/api/health`, {
+    headers: { Authorization: `Bearer ${stateToken}` },
+  });
+  expect(health.status).toBe(200);
+  expect(await health.json()).toEqual({ status: 'ok', api_version: 1 });
+
+  await firstClient.close();
+  expect(readDashboardState(statePath)).toEqual(state);
+
+  await secondClient.close();
+  await waitForStateRemoval(statePath);
+  expect(existsSync(statePath)).toBe(false);
+});
+
+function readDashboardState(path: string): {
+  version: number;
+  url: string;
+  pid: number;
+  started_at: string;
+} {
+  const state = JSON.parse(readFileSync(path, 'utf8')) as {
     version: number;
     url: string;
     pid: number;
@@ -173,11 +202,8 @@ it('creates and removes an opt-in dashboard state file', async () => {
   expect(new URLSearchParams(dashboardUrl.hash.slice(1)).get('token')?.length).toBeGreaterThanOrEqual(32);
   expect(state.pid).toBeGreaterThan(0);
   expect(Number.isNaN(Date.parse(state.started_at))).toBe(false);
-
-  await client.close();
-  await waitForStateRemoval(statePath);
-  expect(existsSync(statePath)).toBe(false);
-});
+  return state;
+}
 
 it('propagates downstream cancellation to the upstream tool call', async () => {
   const client = await connectGateway(gatewayCli, 'auto');
@@ -273,6 +299,13 @@ async function waitForStateRemoval(path: string): Promise<void> {
 async function waitForStateCreation(path: string): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (existsSync(path)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+}
+
+async function waitForStateChange(path: string, previousUrl: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (existsSync(path) && readDashboardState(path).url !== previousUrl) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
 }
