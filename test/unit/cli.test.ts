@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { collectDoctorChecks, parseDoctorArguments } from '../../src/cli/doctor.js';
 import { parseInitArguments, runInit } from '../../src/cli/init.js';
-import { isEntryPointPath } from '../../src/cli/main.js';
+import { isEntryPointPath, parseProxyArguments } from '../../src/cli/main.js';
 
 const temporaryPaths: string[] = [];
 
@@ -54,10 +54,12 @@ describe('apg doctor', () => {
       policyPath,
       auditDbPath: join(directory, 'audit.sqlite'),
       dashboardPort: 0,
+      dashboardStatePath: join(directory, 'dashboard.json'),
       command: commandPath,
     });
 
     expect(checks.every((check) => check.status !== 'fail')).toBe(true);
+    expect(checks.find((check) => check.name === 'Dashboard state')?.status).toBe('pass');
     expect(() => readFileSync(markerPath)).toThrow();
   });
 
@@ -86,11 +88,35 @@ describe('apg doctor', () => {
       auditDbPath: '.apg/audit.sqlite',
       dashboardPort: 47_831,
     });
-    expect(parseDoctorArguments(['--dashboard-port', '0', '--', 'node', '--example-arg'])).toEqual({
+    expect(parseDoctorArguments([
+      '--dashboard-port', '0',
+      '--dashboard-state', '.apg/dashboard.json',
+      '--', 'node', '--example-arg',
+    ])).toEqual({
       policyPath: '.apg/policy.yaml',
       auditDbPath: '.apg/audit.sqlite',
       dashboardPort: 0,
+      dashboardStatePath: '.apg/dashboard.json',
       command: 'node',
+    });
+  });
+});
+
+describe('apg proxy arguments', () => {
+  it('parses an opt-in dashboard state path', () => {
+    expect(parseProxyArguments([
+      'proxy',
+      '--policy', '.apg/policy.yaml',
+      '--audit-db', '.apg/audit.sqlite',
+      '--dashboard-state', '.apg/dashboard.json',
+      '--', 'node', 'server.js',
+    ])).toEqual({
+      policyPath: '.apg/policy.yaml',
+      auditDbPath: '.apg/audit.sqlite',
+      dashboardPort: 47_831,
+      dashboardStatePath: '.apg/dashboard.json',
+      command: 'node',
+      args: ['server.js'],
     });
   });
 });

@@ -8,6 +8,7 @@ import { AuditQueryService } from '../audit/query-service.js';
 import { SqliteAuditRecorder } from '../audit/recorder.js';
 import { LocalApprovalService } from '../approval/service.js';
 import { startDashboard } from '../dashboard/server.js';
+import { type DashboardStateFile, writeDashboardStateFile } from '../dashboard/state-file.js';
 import { openAuditDatabase } from '../db/database.js';
 import { createGateway } from '../gateway/gateway.js';
 import { LivePolicyController } from '../policy/live-controller.js';
@@ -19,6 +20,7 @@ export type ProxyArguments = Readonly<{
   policyPath: string;
   auditDbPath: string;
   dashboardPort: number;
+  dashboardStatePath?: string;
   command: string;
   args: readonly string[];
 }>;
@@ -28,6 +30,7 @@ export function parseProxyArguments(argv: readonly string[]): ProxyArguments {
   let policyPath: string | undefined;
   let auditDbPath: string | undefined;
   let dashboardPort = 47_831;
+  let dashboardStatePath: string | undefined;
   let index = 1;
 
   while (index < argv.length && argv[index] !== '--') {
@@ -37,6 +40,7 @@ export function parseProxyArguments(argv: readonly string[]): ProxyArguments {
     if (option === '--policy' && policyPath === undefined) policyPath = value;
     else if (option === '--audit-db' && auditDbPath === undefined) auditDbPath = value;
     else if (option === '--dashboard-port') dashboardPort = parsePort(value);
+    else if (option === '--dashboard-state' && dashboardStatePath === undefined) dashboardStatePath = value;
     else throw usageError();
     index += 2;
   }
@@ -45,7 +49,8 @@ export function parseProxyArguments(argv: readonly string[]): ProxyArguments {
     throw usageError();
   }
 
-  return { policyPath, auditDbPath, dashboardPort, command, args: argv.slice(index + 2) };
+  const base = { policyPath, auditDbPath, dashboardPort, command, args: argv.slice(index + 2) };
+  return dashboardStatePath === undefined ? base : { ...base, dashboardStatePath };
 }
 
 function parsePort(value: string): number {
@@ -55,7 +60,7 @@ function parsePort(value: string): number {
 }
 
 function usageError(): Error {
-  return new Error('Usage: apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] -- <upstream-command> [args...]');
+  return new Error('Usage: apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] -- <upstream-command> [args...]');
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -120,6 +125,20 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
   process.stderr.write(`[apg] approval dashboard: ${dashboard.url}\n`);
 
+  let dashboardState: DashboardStateFile | undefined;
+  if (parsed.dashboardStatePath !== undefined) {
+    try {
+      dashboardState = writeDashboardStateFile(parsed.dashboardStatePath, dashboard.url);
+      process.stderr.write(`[apg] dashboard state: ${dashboardState.path}\n`);
+    } catch (error) {
+      approvals.close();
+      await dashboard.close();
+      await gateway.close();
+      database.close();
+      throw error;
+    }
+  }
+
   const downstream = serveStdioGateway(gateway);
   let closing = false;
   const close = async () => {
@@ -127,7 +146,11 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     closing = true;
     approvals.close();
     await downstream.close();
-    await dashboard.close();
+    try {
+      await dashboard.close();
+    } finally {
+      dashboardState?.remove();
+    }
     await gateway.close();
     database.close();
   };
@@ -143,8 +166,8 @@ function generalUsage(): string {
     '',
     'Usage:',
     '  apg init [--directory <path>]',
-    '  apg doctor [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>] [-- <upstream-command> [args...]]',
-    '  apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] -- <upstream-command> [args...]',
+    '  apg doctor [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>] [--dashboard-state <dashboard.json>] [-- <upstream-command> [args...]]',
+    '  apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] -- <upstream-command> [args...]',
   ].join('\n');
 }
 

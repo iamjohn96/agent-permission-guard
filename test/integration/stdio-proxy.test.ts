@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolve } from 'node:path';
@@ -155,6 +155,30 @@ it('keeps stdout pure enough for an MCP client to connect and exchange messages'
   expect(textOf(result)).toBe('valid-jsonrpc');
 });
 
+it('creates and removes an opt-in dashboard state file', async () => {
+  const statePath = join(testDirectory, `${randomUUID()}.dashboard.json`);
+  const client = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
+  await waitForStateCreation(statePath);
+  const state = JSON.parse(readFileSync(statePath, 'utf8')) as {
+    version: number;
+    url: string;
+    pid: number;
+    started_at: string;
+  };
+
+  expect(state.version).toBe(1);
+  const dashboardUrl = new URL(state.url);
+  expect(dashboardUrl.hostname).toBe('127.0.0.1');
+  expect(dashboardUrl.protocol).toBe('http:');
+  expect(new URLSearchParams(dashboardUrl.hash.slice(1)).get('token')?.length).toBeGreaterThanOrEqual(32);
+  expect(state.pid).toBeGreaterThan(0);
+  expect(Number.isNaN(Date.parse(state.started_at))).toBe(false);
+
+  await client.close();
+  await waitForStateRemoval(statePath);
+  expect(existsSync(statePath)).toBe(false);
+});
+
 it('propagates downstream cancellation to the upstream tool call', async () => {
   const client = await connectGateway(gatewayCli, 'auto');
   const controller = new AbortController();
@@ -210,26 +234,26 @@ async function connectGateway(
   entryPoint: string,
   mode: ClientMode,
   policyPath: string = allowPolicy,
+  dashboardStatePath?: string,
 ): Promise<Client> {
   const client = new Client(
     { name: `apg-test-${mode}`, version: '0.1.0' },
     { versionNegotiation: { mode } },
   );
+  const args = [
+    entryPoint, 'proxy',
+    '--policy', policyPath,
+    '--audit-db', join(testDirectory, `${randomUUID()}.sqlite`),
+    '--dashboard-port', '0',
+  ];
+  if (dashboardStatePath !== undefined) {
+    args.push('--dashboard-state', dashboardStatePath);
+  }
+  args.push('--', process.execPath, fixtureServer);
+
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [
-      entryPoint,
-      'proxy',
-      '--policy',
-      policyPath,
-      '--audit-db',
-      join(testDirectory, `${randomUUID()}.sqlite`),
-      '--dashboard-port',
-      '0',
-      '--',
-      process.execPath,
-      fixtureServer,
-    ],
+    args,
     env: process.env.PATH === undefined ? {} : { PATH: process.env.PATH },
     stderr: 'pipe',
   });
@@ -237,6 +261,20 @@ async function connectGateway(
   await client.connect(transport);
   openClients.push(client);
   return client;
+}
+
+async function waitForStateRemoval(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (!existsSync(path)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+}
+
+async function waitForStateCreation(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (existsSync(path)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
 }
 
 type DashboardAccess = Readonly<{ origin: string; token: string }>;

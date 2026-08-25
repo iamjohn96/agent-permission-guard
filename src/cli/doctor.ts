@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
 
@@ -8,6 +8,7 @@ export type DoctorArguments = Readonly<{
   policyPath: string;
   auditDbPath: string;
   dashboardPort: number;
+  dashboardStatePath?: string;
   command?: string;
 }>;
 
@@ -21,6 +22,7 @@ export function parseDoctorArguments(argv: readonly string[]): DoctorArguments {
   let policyPath = '.apg/policy.yaml';
   let auditDbPath = '.apg/audit.sqlite';
   let dashboardPort = 47_831;
+  let dashboardStatePath: string | undefined;
   let command: string | undefined;
   let index = 0;
 
@@ -31,6 +33,7 @@ export function parseDoctorArguments(argv: readonly string[]): DoctorArguments {
     if (option === '--policy') policyPath = value;
     else if (option === '--audit-db') auditDbPath = value;
     else if (option === '--dashboard-port') dashboardPort = parseDoctorPort(value);
+    else if (option === '--dashboard-state') dashboardStatePath = value;
     else throw doctorUsageError();
     index += 2;
   }
@@ -40,9 +43,9 @@ export function parseDoctorArguments(argv: readonly string[]): DoctorArguments {
     if (command === undefined) throw doctorUsageError();
   }
 
-  return command === undefined
-    ? { policyPath, auditDbPath, dashboardPort }
-    : { policyPath, auditDbPath, dashboardPort, command };
+  const base = { policyPath, auditDbPath, dashboardPort };
+  const withState = dashboardStatePath === undefined ? base : { ...base, dashboardStatePath };
+  return command === undefined ? withState : { ...withState, command };
 }
 
 export async function collectDoctorChecks(
@@ -54,6 +57,7 @@ export async function collectDoctorChecks(
   checks.push(checkPolicy(arguments_.policyPath));
   checks.push(checkAuditPath(arguments_.auditDbPath));
   checks.push(await checkDashboardPort(arguments_.dashboardPort));
+  checks.push(checkDashboardStatePath(arguments_.dashboardStatePath));
   checks.push(checkCommand(arguments_.command, environment.PATH));
   return checks;
 }
@@ -132,6 +136,42 @@ async function checkDashboardPort(port: number): Promise<DoctorCheck> {
   });
 }
 
+function checkDashboardStatePath(path: string | undefined): DoctorCheck {
+  if (path === undefined) {
+    return {
+      name: 'Dashboard state',
+      status: 'skip',
+      detail: 'not configured; the tokenized dashboard URL will only be written to MCP stderr',
+    };
+  }
+
+  const absolutePath = resolve(path);
+  const parent = dirname(absolutePath);
+  try {
+    const parentStatus = lstatSync(parent);
+    if (!parentStatus.isDirectory() || parentStatus.isSymbolicLink()) {
+      throw new Error(`${parent} is not a real directory`);
+    }
+    if (process.platform !== 'win32' && (parentStatus.mode & 0o077) !== 0) {
+      throw new Error(`${parent} allows group or other access`);
+    }
+    accessSync(parent, constants.W_OK);
+
+    if (existsSync(absolutePath)) {
+      const status = lstatSync(absolutePath);
+      if (!status.isFile() || status.isSymbolicLink()) throw new Error(`${absolutePath} is not a regular file`);
+      if (process.platform !== 'win32' && (status.mode & 0o077) !== 0) {
+        throw new Error(`${absolutePath} allows group or other access`);
+      }
+      accessSync(absolutePath, constants.R_OK | constants.W_OK);
+    }
+
+    return { name: 'Dashboard state', status: 'pass', detail: `${absolutePath} can be stored privately` };
+  } catch (error) {
+    return { name: 'Dashboard state', status: 'fail', detail: errorMessage(error, absolutePath) };
+  }
+}
+
 function checkCommand(command: string | undefined, path: string | undefined): DoctorCheck {
   if (command === undefined) {
     return {
@@ -169,7 +209,7 @@ function parseDoctorPort(value: string): number {
 }
 
 function doctorUsageError(): Error {
-  return new Error('Usage: apg doctor [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>] [-- <upstream-command> [args...]]');
+  return new Error('Usage: apg doctor [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>] [--dashboard-state <dashboard.json>] [-- <upstream-command> [args...]]');
 }
 
 function errorMessage(error: unknown, fallback: string): string {

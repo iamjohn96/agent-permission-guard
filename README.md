@@ -48,10 +48,11 @@ node dist/src/cli/main.js proxy \
   --policy ./.apg/policy.yaml \
   --audit-db ./.apg/audit.sqlite \
   --dashboard-port 47831 \
+  --dashboard-state ./.apg/dashboard.json \
   -- <upstream-command> [args...]
 ```
 
-APG prints a tokenized localhost dashboard URL to stderr. Open that exact URL to review approvals, inspect the audit trail, and edit the active policy.
+APG prints a tokenized localhost dashboard URL to stderr. With the optional `--dashboard-state` setting, it also writes the URL, process ID, and start time to a private JSON file for MCP hosts that hide stderr. The file contains a bearer token: do not share or commit it. APG removes its own state file after a normal shutdown.
 
 ## Current milestone
 
@@ -104,13 +105,13 @@ The source-build examples use `node dist/src/cli/main.js`. After the package is 
 
 ```sh
 apg init
-apg doctor -- <upstream-command>
-apg proxy --policy ./.apg/policy.yaml --audit-db ./.apg/audit.sqlite -- <upstream-command> [args...]
+apg doctor [--dashboard-state ./.apg/dashboard.json] -- <upstream-command>
+apg proxy --policy ./.apg/policy.yaml --audit-db ./.apg/audit.sqlite [--dashboard-state ./.apg/dashboard.json] -- <upstream-command> [args...]
 ```
 
 `apg init` defaults to `./.apg` and accepts `--directory <path>`. It creates `policy.yaml` with private file permissions and refuses to overwrite an existing policy. The audit database is created only when the proxy first starts.
 
-After startup, APG prints a secure local dashboard URL to stderr. Open that exact URL to review pending requests. Its token is held only for the running process and the current browser session. Use `--dashboard-port 0` when the operating system should choose a free loopback port.
+After startup, APG prints a secure local dashboard URL to stderr. Open that exact URL to review pending requests. By default, its token is held only for the running process and the current browser session. Add `--dashboard-state <path>` when the MCP host hides stderr; APG then writes the tokenized URL to a private local file and removes it after a normal shutdown. Use `--dashboard-port 0` when the operating system should choose a free loopback port.
 
 The policy and audit database are mandatory. Missing or invalid policy input and database initialization failures stop startup. Arguments are stored as bounded, redacted previews; tool result bodies are not retained. Secret-derived raw values are not included in request hashes.
 

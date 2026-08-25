@@ -15,7 +15,7 @@ npm install --global agent-permission-guard
 mkdir apg-codex-demo
 cd apg-codex-demo
 apg init
-apg doctor -- npx
+apg doctor --dashboard-state "$PWD/.apg/dashboard.json" -- npx
 ```
 
 Review `.apg/policy.yaml` before continuing. The starter policy defaults unmatched tools to Ask.
@@ -30,6 +30,7 @@ codex mcp add apg-everything -- \
   --policy "$PWD/.apg/policy.yaml" \
   --audit-db "$PWD/.apg/audit.sqlite" \
   --dashboard-port 47831 \
+  --dashboard-state "$PWD/.apg/dashboard.json" \
   -- npx -y @modelcontextprotocol/server-everything@2026.8.18
 ```
 
@@ -44,7 +45,7 @@ codex mcp list
 
 Restart the Codex client after adding the server. In clients that support it, use `/mcp` to inspect connected servers.
 
-APG writes its tokenized localhost dashboard URL to MCP stderr when the server starts. Open that exact URL to review Ask decisions and inspect the audit trail. Some Codex surfaces may not make MCP stderr easy to discover; improving dashboard discovery is a known developer-alpha limitation.
+APG writes its tokenized localhost dashboard URL to MCP stderr and to `.apg/dashboard.json` when the server starts. If your Codex surface hides MCP stderr, open the state file and copy its `url` value into your browser. The file is private (`0600`), is removed after a normal shutdown, and contains a bearer token: do not share it, commit it, or copy it into logs.
 
 ## Protect another local STDIO server
 
@@ -56,6 +57,7 @@ codex mcp add apg-protected -- \
   --policy "/absolute/path/to/.apg/policy.yaml" \
   --audit-db "/absolute/path/to/.apg/audit.sqlite" \
   --dashboard-port 47831 \
+  --dashboard-state "/absolute/path/to/.apg/dashboard.json" \
   -- <trusted-upstream-command> [args...]
 ```
 
@@ -71,7 +73,7 @@ This command changes your local Codex MCP configuration:
 codex mcp remove apg-everything
 ```
 
-Removing the Codex entry does not delete `.apg/policy.yaml` or `.apg/audit.sqlite`.
+Removing the Codex entry does not delete `.apg/policy.yaml` or `.apg/audit.sqlite`. A stale `dashboard.json` may remain after a forced process termination; confirm its PID is no longer running before deleting it.
 
 ## Current scope
 
