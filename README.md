@@ -21,6 +21,14 @@ apg doctor -- node
 
 To place APG between Codex and a local STDIO MCP server, follow the [Codex connection guide](./docs/codex.md).
 
+Inspect a public npm package without downloading or installing it:
+
+```sh
+apg inspect npm yaml@latest
+```
+
+The inspect command sends the package name to the selected registry, resolves an exact version, and prints the local Install Guard risk decision. It does not read `.npmrc`, send npm credentials, download a tarball, request approval, or install the package. See the [npm registry data-flow document](./docs/npm-registry-data-flow.md).
+
 ## Install from source
 
 To build the CLI from a local checkout instead:
@@ -59,6 +67,7 @@ APG prints a tokenized localhost dashboard URL to stderr. With the optional `--d
 - Proxy `tools/list` from an upstream MCP server.
 - Initialize a private starter policy with `apg init` without overwriting existing policy files.
 - Diagnose the local runtime, policy, audit path, dashboard port, and upstream executable with `apg doctor` without executing the upstream command.
+- Inspect npm/npx package metadata and explain an Install Guard decision without downloading or installing a package.
 - Forward allowed `tools/call` requests.
 - Stop denied calls before they reach the upstream server.
 - Support modern MCP `2026-07-28` and legacy `2025-11-25` clients through the official SDK.
@@ -106,6 +115,7 @@ The source-build examples use `node dist/src/cli/main.js`. After the package is 
 ```sh
 apg init
 apg doctor [--dashboard-state ./.apg/dashboard.json] -- <upstream-command>
+apg inspect <npm|npx> <package-spec> [--registry <https-url>]
 apg proxy --policy ./.apg/policy.yaml --audit-db ./.apg/audit.sqlite [--dashboard-state ./.apg/dashboard.json] -- <upstream-command> [args...]
 ```
 

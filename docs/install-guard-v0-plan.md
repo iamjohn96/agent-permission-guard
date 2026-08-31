@@ -1,6 +1,6 @@
 # Install Guard v0 Implementation Plan
 
-Status: IG0 and IG1 accepted; IG2 implemented locally and pending Jonny acceptance
+Status: IG0–IG2 accepted; IG2.5 inspect CLI implemented locally and pending Jonny acceptance
 Product boundary: an APG module with a separate npm/npx execution adapter
 
 ## Goal

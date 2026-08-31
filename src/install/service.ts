@@ -23,7 +23,7 @@ export class InstallGuardService {
 
   async run(input: InstallRequest, approvalTtlMs: number): Promise<InstallGuardResult> {
     const request = snapshotRequest(input);
-    const resolution = validateResolution(request, await this.dependencies.metadata.resolve(request));
+    const resolution = validateInstallResolution(request, await this.dependencies.metadata.resolve(request));
     const evaluation = evaluateInstallPolicy(resolution);
     const audit = this.dependencies.audit.begin(request, evaluation);
 
@@ -94,7 +94,10 @@ function snapshotRequest(request: InstallRequest): InstallRequest {
   });
 }
 
-function validateResolution(request: InstallRequest, resolution: InstallResolution): InstallResolution {
+export function validateInstallResolution(
+  request: InstallRequest,
+  resolution: InstallResolution,
+): InstallResolution {
   if (resolution.status !== 'resolved') {
     if (resolution.status !== 'unresolved' && !EXACT_VERSION.test(request.requestedSpecifier)) {
       return { status: 'unresolved', reason: 'Metadata failed before the mutable version could be resolved exactly' };

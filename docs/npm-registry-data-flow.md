@@ -6,6 +6,14 @@ Status: IG2 local design; no live registry request has been executed
 
 Install Guard needs to resolve a requested npm package to one exact version and identify whether the selected version declares an install lifecycle script. IG2 introduces a read-only registry adapter behind an injectable transport. The default test suite uses only fake responses.
 
+The user-facing read-only command is:
+
+```text
+apg inspect <npm|npx> <package-spec> [--registry <https-url>]
+```
+
+It prints an analysis result only. It does not create an approval ticket, download a tarball, update `package.json`, or invoke npm/npx.
+
 ## External request
 
 For a request such as `yaml@latest`, the adapter prepares:

@@ -15,6 +15,7 @@ import { LivePolicyController } from '../policy/live-controller.js';
 import { serveStdioGateway } from '../transport/stdio-downstream.js';
 import { parseDoctorArguments, runDoctor } from './doctor.js';
 import { parseInitArguments, runInit } from './init.js';
+import { parseInspectArguments, runInspect } from './inspect.js';
 
 export type ProxyArguments = Readonly<{
   policyPath: string;
@@ -71,6 +72,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   if (argv[0] === 'doctor') {
     const healthy = await runDoctor(parseDoctorArguments(argv.slice(1)));
     if (!healthy) process.exitCode = 1;
+    return;
+  }
+  if (argv[0] === 'inspect') {
+    await runInspect(parseInspectArguments(argv.slice(1)));
     return;
   }
   if (argv[0] === '--help' || argv[0] === '-h' || argv.length === 0) {
@@ -167,6 +172,7 @@ function generalUsage(): string {
     'Usage:',
     '  apg init [--directory <path>]',
     '  apg doctor [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>] [--dashboard-state <dashboard.json>] [-- <upstream-command> [args...]]',
+    '  apg inspect <npm|npx> <package-spec> [--registry <https-url>]',
     '  apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] -- <upstream-command> [args...]',
   ].join('\n');
 }

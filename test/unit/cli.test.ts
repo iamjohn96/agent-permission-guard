@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { collectDoctorChecks, parseDoctorArguments } from '../../src/cli/doctor.js';
 import { parseInitArguments, runInit } from '../../src/cli/init.js';
+import { parseInspectArguments, runInspect } from '../../src/cli/inspect.js';
 import { isEntryPointPath, parseProxyArguments } from '../../src/cli/main.js';
+import type { NpmRegistryTransport, RegistryResponse } from '../../src/install/npm-registry.js';
 
 const temporaryPaths: string[] = [];
 
@@ -121,6 +123,78 @@ describe('apg proxy arguments', () => {
   });
 });
 
+describe('apg inspect', () => {
+  it('parses a package and an optional explicit HTTPS registry', () => {
+    expect(parseInspectArguments(['npm', 'yaml@latest'], '/tmp/project')).toEqual({
+      runner: 'npm',
+      packageSpec: 'yaml@latest',
+      registry: 'https://registry.npmjs.org/',
+      workingDirectory: '/tmp/project',
+    });
+    expect(parseInspectArguments([
+      'npx', '@scope/pkg@1.0.0', '--registry', 'https://packages.example.test/npm/',
+    ], '/tmp/project')).toMatchObject({
+      runner: 'npx',
+      registry: 'https://packages.example.test/npm/',
+    });
+  });
+
+  it.each([
+    { argv: [] },
+    { argv: ['pip', 'package'] },
+    { argv: ['npm'] },
+    { argv: ['npm', 'yaml', '--json'] },
+    { argv: ['npm', 'yaml', '--registry'] },
+  ])('rejects unsupported inspect arguments: $argv', ({ argv }) => {
+    expect(() => parseInspectArguments(argv, '/tmp/project')).toThrow(/Usage/);
+  });
+
+  it('prints a bounded decision using a fake registry without installing anything', async () => {
+    const output: string[] = [];
+    const transport = new InspectFakeTransport({
+      status: 200,
+      contentType: 'application/vnd.npm.install-v1+json',
+      body: {
+        name: 'yaml',
+        'dist-tags': { latest: '2.9.0' },
+        versions: {
+          '2.9.0': {
+            name: 'yaml',
+            version: '2.9.0',
+            hasInstallScript: false,
+            dist: { tarball: 'https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz' },
+            readme: 'private response content must not be printed',
+          },
+        },
+      },
+    });
+
+    await runInspect(parseInspectArguments(['npm', 'yaml@latest'], '/tmp/project'), {
+      transport,
+      output: { write: (chunk) => { output.push(String(chunk)); return true; } },
+    });
+
+    const text = output.join('');
+    expect(text).toContain('Resolved version: 2.9.0');
+    expect(text).toContain('Decision: ASK');
+    expect(text).toContain('limited_registry_evidence');
+    expect(text).toContain('no package was downloaded or installed');
+    expect(text).not.toContain('private response content');
+    expect(transport.requests).toBe(1);
+  });
+
+  it('reports Deny when a mutable tag cannot be resolved', async () => {
+    const output: string[] = [];
+    await runInspect(parseInspectArguments(['npm', 'yaml@latest'], '/tmp/project'), {
+      transport: new InspectFakeTransport(new Error('private registry failure')),
+      output: { write: (chunk) => { output.push(String(chunk)); return true; } },
+    });
+
+    expect(output.join('')).toContain('Decision: DENY');
+    expect(output.join('')).not.toContain('private registry failure');
+  });
+});
+
 describe('CLI entry point', () => {
   it('recognizes an npm-style symlink to the packaged executable', () => {
     const directory = temporaryDirectory();
@@ -139,4 +213,16 @@ function temporaryDirectory(): string {
   mkdirSync(path, { mode: 0o700 });
   temporaryPaths.push(path);
   return path;
+}
+
+class InspectFakeTransport implements NpmRegistryTransport {
+  requests = 0;
+
+  constructor(private readonly response: RegistryResponse | Error) {}
+
+  async getPackage(): Promise<RegistryResponse> {
+    this.requests += 1;
+    if (this.response instanceof Error) throw this.response;
+    return this.response;
+  }
 }
