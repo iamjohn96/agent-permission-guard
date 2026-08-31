@@ -2,12 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
-import type {
-  InterceptorDecision,
-  ToolCallContext,
-} from '../gateway/call-interceptor.js';
+import type { ToolCallContext } from '../gateway/call-interceptor.js';
 import type { ApprovalOutcome, ApprovalRequestView } from '../approval/types.js';
-import type { PolicyEvaluation } from '../policy/evaluator.js';
+import type { Decision } from '../policy/schema.js';
+import type { RiskBand } from '../risk/types.js';
 import type { AuditDatabase } from '../db/database.js';
 import { canonicalJson } from './canonical-json.js';
 import { redactForAudit } from './redaction.js';
@@ -20,21 +18,39 @@ export interface AuditCall {
   markApprovalResolved(approvalId: string, outcome: ApprovalOutcome): void;
   markBlocked(status: 'denied' | 'approval_unavailable' | 'approval_denied' | 'approval_expired' | 'approval_cancelled'): void;
   markCompleted(result: CallToolResult): void;
+  markExecutionResult(summary: unknown, isError: boolean): void;
   markFailed(code: string): void;
 }
 
 export interface AuditRecorder {
-  begin(context: ToolCallContext, decision: InterceptorDecision): AuditCall;
+  begin(context: ToolCallContext, decision: AuditDecision): AuditCall;
 }
 
+export type AuditDecision = Readonly<{
+  action: 'forward' | 'ask' | 'deny';
+  reason?: string;
+  evaluation?: Readonly<{
+    baseDecision: Decision;
+    effectiveDecision: Decision;
+    matchedRuleId?: string;
+    reasonCodes: readonly string[];
+    risk: Readonly<{
+      score: number;
+      band: RiskBand;
+      signals: readonly unknown[];
+    }>;
+  }>;
+}>;
+
 export class NoopAuditRecorder implements AuditRecorder {
-  begin(_context: ToolCallContext, _decision: InterceptorDecision): AuditCall {
+  begin(_context: ToolCallContext, _decision: AuditDecision): AuditCall {
     return {
       markForwarding() {},
       markApprovalRequested() {},
       markApprovalResolved() {},
       markBlocked() {},
       markCompleted() {},
+      markExecutionResult() {},
       markFailed() {},
     };
   }
@@ -46,7 +62,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  begin(context: ToolCallContext, decision: InterceptorDecision): AuditCall {
+  begin(context: ToolCallContext, decision: AuditDecision): AuditCall {
     const id = randomUUID();
     const startedAt = this.now();
     const evaluation = normalizeEvaluation(decision);
@@ -144,6 +160,15 @@ export class SqliteAuditRecorder implements AuditRecorder {
         })();
         terminal = true;
       },
+      markExecutionResult: (summary, isError) => {
+        if (terminal) throw new Error('Audit call is already terminal');
+        const redactedSummary = redactForAudit(summary);
+        this.database.transaction(() => {
+          this.finish(id, isError ? 'execution_error' : 'completed', startedAt, redactedSummary, undefined);
+          this.appendEvent(id, 'execution_completed', redactedSummary);
+        })();
+        terminal = true;
+      },
       markFailed: (code) => {
         if (terminal) return;
         this.database.transaction(() => {
@@ -216,7 +241,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
   }
 }
 
-function normalizeEvaluation(decision: InterceptorDecision): PolicyEvaluation {
+function normalizeEvaluation(decision: AuditDecision): NonNullable<AuditDecision['evaluation']> {
   if (decision.evaluation !== undefined) return decision.evaluation;
   const fallback = decision.action === 'forward' ? 'allow' : decision.action;
   return {

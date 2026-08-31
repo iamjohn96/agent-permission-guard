@@ -39,6 +39,20 @@ export interface InstallMetadataProvider {
   resolve(request: InstallRequest): Promise<InstallResolution>;
 }
 
+export type InstallExecutionResult = Readonly<{
+  status: 'completed' | 'failed';
+  exitCode: number;
+  durationMs: number;
+  summary: string;
+}>;
+
+export interface InstallRunnerAdapter {
+  run(
+    request: InstallRequest,
+    metadata: ResolvedPackageMetadata | undefined,
+  ): Promise<InstallExecutionResult>;
+}
+
 export type InstallRiskSignalCode =
   | 'exact_version_unresolved'
   | 'metadata_unavailable'
@@ -69,4 +83,10 @@ export type InstallPolicyEvaluation = Readonly<{
   effectiveDecision: Decision;
   reasonCodes: readonly string[];
   risk: InstallRiskAssessment;
+}>;
+
+export type InstallGuardResult = Readonly<{
+  status: 'completed' | 'failed' | 'audit_failed' | 'denied' | 'approval_denied' | 'approval_expired' | 'approval_cancelled';
+  evaluation: InstallPolicyEvaluation;
+  execution?: InstallExecutionResult;
 }>;

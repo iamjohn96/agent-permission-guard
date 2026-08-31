@@ -81,6 +81,24 @@ describe('dashboard API security', () => {
       });
       expect(wrongOrigin.status).toBe(403);
 
+      const installTicket = service.request({
+        ...safeRequest,
+        kind: 'install',
+        serverId: 'install-guard',
+        toolName: 'npm install',
+        arguments: { package: 'yaml@2.9.0' },
+      }, 1_000);
+      const approvalList = await fetch(`${url.origin}/api/approvals`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const approvalPayload = await approvalList.json() as { approvals: Array<{ id: string; kind?: string }> };
+      expect(approvalPayload.approvals).toContainEqual(expect.objectContaining({
+        id: installTicket.request.id,
+        kind: 'install',
+      }));
+      expect(service.decide(installTicket.request.id, 'denied')).toBe('denied');
+      await expect(installTicket.outcome).resolves.toBe('denied');
+
       const approved = await fetch(`${url.origin}/api/approvals/${ticket.request.id}/approve`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },

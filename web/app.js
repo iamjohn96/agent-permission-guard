@@ -43,7 +43,8 @@ function renderApprovals(requests) {
     const card = element('article', 'request-card');
     const top = element('div', 'request-top');
     const title = element('div');
-    title.append(element('p', 'server', request.serverId), element('h3', '', request.toolName));
+    const source = request.kind === 'install' ? 'Install Guard' : request.serverId;
+    title.append(element('p', 'server', source), element('h3', '', request.toolName));
     top.append(title, element('span', `risk risk-${request.risk.band}`, `${request.risk.score} · ${request.risk.band}`));
     const meta = element('div', 'meta');
     meta.append(element('span', '', `Expires ${new Date(request.expiresAt).toLocaleTimeString()}`), element('span', '', request.reasonCodes.join(' · ')));

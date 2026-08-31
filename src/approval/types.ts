@@ -1,13 +1,18 @@
-import type { RiskAssessment } from '../risk/types.js';
+import type { RiskBand } from '../risk/types.js';
 
 export type ApprovalOutcome = 'approved' | 'denied' | 'expired' | 'cancelled';
 
 export type ApprovalRequestView = Readonly<{
   id: string;
+  kind?: 'mcp_tool' | 'install';
   serverId: string;
   toolName: string;
   arguments: unknown;
-  risk: RiskAssessment;
+  risk: Readonly<{
+    score: number;
+    band: RiskBand;
+    signals: readonly unknown[];
+  }>;
   reasonCodes: readonly string[];
   requestedAt: string;
   expiresAt: string;

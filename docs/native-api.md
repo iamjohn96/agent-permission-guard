@@ -60,6 +60,8 @@ The response contains no token, file path, command, PID, policy, audit data, or 
 
 Returns the same redacted pending approval representation used by the local browser dashboard.
 
+Approval objects may include an additive `kind` field. `kind: "install"` identifies an Install Guard request; absence of the field retains the existing MCP tool-call meaning. Native clients must ignore unknown future fields. API version 1 is unchanged because this field is optional and backward-compatible.
+
 ### Decide once
 
 `POST /api/approvals/<request-id>/approve`  

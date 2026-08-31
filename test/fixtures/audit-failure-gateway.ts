@@ -12,6 +12,7 @@ const audit: AuditRecorder = {
       markApprovalResolved() {},
       markBlocked() {},
       markCompleted() {},
+      markExecutionResult() {},
       markFailed() {},
     };
   },

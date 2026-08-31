@@ -1,6 +1,6 @@
 # Install Guard v0 Implementation Plan
 
-Status: IG0 accepted by Jonny on 2026-08-31
+Status: IG0 accepted; IG1 implemented locally and pending Jonny acceptance
 Product boundary: an APG module with a separate npm/npx execution adapter
 
 ## Goal
@@ -158,6 +158,8 @@ Tests should use a fake metadata provider and fake runner first. A live registry
 - add install audit event types without breaking existing records
 - fake runner end-to-end tests
 - dashboard representation for an install approval
+
+Implemented locally without a database migration. Install requests use the existing one-time approval API with an additive `kind: install` field and are recorded in the existing tamper-evident audit chain under the `install-guard` source. The runner remains an interface backed only by test fakes.
 
 ### IG2 — Read-only registry adapter
 

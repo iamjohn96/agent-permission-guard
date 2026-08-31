@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
+import { LocalApprovalService } from '../../src/approval/service.js';
+import { AuditQueryService } from '../../src/audit/query-service.js';
+import { SqliteAuditRecorder } from '../../src/audit/recorder.js';
+import { openAuditDatabase } from '../../src/db/database.js';
+import { InstallAuditAdapter } from '../../src/install/audit.js';
 import { InMemoryInstallMetadataProvider } from '../../src/install/metadata.js';
 import { InstallParseError, parseInstallRequest } from '../../src/install/parser.js';
 import { evaluateInstallPolicy } from '../../src/install/policy.js';
 import { scoreInstallRisk } from '../../src/install/risk.js';
-import type { ResolvedPackageMetadata } from '../../src/install/types.js';
+import { InstallGuardService } from '../../src/install/service.js';
+import type {
+  InstallExecutionResult,
+  InstallRequest,
+  InstallRunnerAdapter,
+  ResolvedPackageMetadata,
+} from '../../src/install/types.js';
 
 const workingDirectory = '/tmp/apg-install-test';
 
@@ -141,6 +152,119 @@ describe('Install Guard risk and built-in policy', () => {
   });
 });
 
+describe('Install Guard approval and audit integration', () => {
+  it('runs a safe request through the fake runner and records it in the existing audit chain', async () => {
+    const fixture = createServiceFixture(safeMetadata());
+    try {
+      const result = await fixture.service.run(fixture.request, 1_000);
+
+      expect(result.status).toBe('completed');
+      expect(fixture.runner.requests).toHaveLength(1);
+      expect(fixture.auditQuery.listRecent(10)).toMatchObject({
+        hashChainValid: true,
+        calls: [{
+          serverId: 'install-guard',
+          toolName: 'npm_install',
+          effectiveDecision: 'allow',
+          status: 'completed',
+        }],
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it('shows an install-specific one-time approval before invoking the fake runner', async () => {
+    const fixture = createServiceFixture({ ...safeMetadata(), lifecycleScripts: ['postinstall'] });
+    try {
+      const running = fixture.service.run(fixture.request, 1_000);
+      const pending = await waitForPending(fixture.approvals);
+
+      expect(pending).toMatchObject({
+        kind: 'install',
+        serverId: 'install-guard',
+        toolName: 'npm install',
+        arguments: { package: 'yaml@2.9.0' },
+      });
+      expect(fixture.runner.requests).toHaveLength(0);
+      expect(fixture.approvals.decide(pending.id, 'approved')).toBe('approved');
+      await expect(running).resolves.toMatchObject({ status: 'completed' });
+      expect(fixture.runner.requests).toHaveLength(1);
+      expect(fixture.auditQuery.listRecent(10).calls[0]).toMatchObject({
+        approvalStatus: 'approved',
+        status: 'completed',
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it('never invokes the runner after denial and preserves the request snapshot', async () => {
+    const fixture = createServiceFixture({ ...safeMetadata(), lifecycleScripts: ['install'] });
+    const mutableOptions = ['--save-exact'];
+    const mutableRequest: InstallRequest = { ...fixture.request, options: mutableOptions };
+    try {
+      const running = fixture.service.run(mutableRequest, 1_000);
+      mutableOptions.push('--save-dev');
+      const pending = await waitForPending(fixture.approvals);
+      expect(pending.arguments).toMatchObject({ options: ['--save-exact'] });
+      fixture.approvals.decide(pending.id, 'denied');
+
+      await expect(running).resolves.toMatchObject({ status: 'approval_denied' });
+      expect(fixture.runner.requests).toHaveLength(0);
+      expect(fixture.auditQuery.listRecent(10).calls[0]).toMatchObject({
+        approvalStatus: 'denied',
+        status: 'approval_denied',
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it('blocks mutable targets when metadata fails before exact resolution', async () => {
+    const request = parseInstallRequest('npm', ['yaml@latest'], workingDirectory);
+    const fixture = createServiceFixture(undefined, request, {
+      status: 'unavailable',
+      reason: 'offline',
+    });
+    try {
+      await expect(fixture.service.run(request, 1_000)).resolves.toMatchObject({ status: 'denied' });
+      expect(fixture.approvals.listPending()).toHaveLength(0);
+      expect(fixture.runner.requests).toHaveLength(0);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it('does not invoke the runner when approval expires', async () => {
+    const fixture = createServiceFixture({ ...safeMetadata(), lifecycleScripts: ['prepare'] });
+    try {
+      await expect(fixture.service.run(fixture.request, 5)).resolves.toMatchObject({
+        status: 'approval_expired',
+      });
+      expect(fixture.runner.requests).toHaveLength(0);
+      expect(fixture.auditQuery.listRecent(10).calls[0]).toMatchObject({
+        approvalStatus: 'expired',
+        status: 'approval_expired',
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it('records a runner failure without retaining its raw error text', async () => {
+    const fixture = createServiceFixture(safeMetadata(), undefined, undefined, true);
+    try {
+      await expect(fixture.service.run(fixture.request, 1_000)).resolves.toMatchObject({ status: 'failed' });
+      const call = fixture.auditQuery.listRecent(10).calls[0];
+      expect(call).toMatchObject({ status: 'failed', errorCode: 'install_runner_failed' });
+      expect(JSON.stringify(call)).not.toContain('private runner detail');
+    } finally {
+      fixture.close();
+    }
+  });
+});
+
 function safeMetadata(): ResolvedPackageMetadata {
   return {
     packageName: 'yaml',
@@ -156,4 +280,68 @@ function safeMetadata(): ResolvedPackageMetadata {
     provenanceInconsistent: false,
     mutableSource: false,
   };
+}
+
+class FakeInstallRunner implements InstallRunnerAdapter {
+  readonly requests: InstallRequest[] = [];
+
+  constructor(private readonly shouldFail = false) {}
+
+  async run(request: InstallRequest): Promise<InstallExecutionResult> {
+    this.requests.push(request);
+    if (this.shouldFail) throw new Error('private runner detail');
+    return { status: 'completed', exitCode: 0, durationMs: 12, summary: 'fake execution completed' };
+  }
+}
+
+function createServiceFixture(
+  metadata: ResolvedPackageMetadata | undefined,
+  requestedInput?: InstallRequest,
+  overrideResolution?: Awaited<ReturnType<InMemoryInstallMetadataProvider['resolve']>>,
+  runnerShouldFail = false,
+): Readonly<{
+  request: InstallRequest;
+  service: InstallGuardService;
+  runner: FakeInstallRunner;
+  approvals: LocalApprovalService;
+  auditQuery: AuditQueryService;
+  close(): void;
+}> {
+  const request = requestedInput ?? parseInstallRequest('npm', ['yaml@2.9.0'], workingDirectory);
+  const resolution = overrideResolution ?? (metadata === undefined
+    ? { status: 'unavailable' as const, reason: 'offline fixture' }
+    : { status: 'resolved' as const, metadata });
+  const provider = new InMemoryInstallMetadataProvider([{ request, resolution }]);
+  const approvals = new LocalApprovalService();
+  const database = openAuditDatabase(':memory:');
+  const recorder = new SqliteAuditRecorder(database);
+  const auditQuery = new AuditQueryService(database, recorder);
+  const runner = new FakeInstallRunner(runnerShouldFail);
+  const service = new InstallGuardService({
+    metadata: provider,
+    approvals,
+    audit: new InstallAuditAdapter(recorder),
+    runner,
+  });
+
+  return {
+    request,
+    service,
+    runner,
+    approvals,
+    auditQuery,
+    close: () => {
+      approvals.close();
+      database.close();
+    },
+  };
+}
+
+async function waitForPending(approvals: LocalApprovalService) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const request = approvals.listPending()[0];
+    if (request !== undefined) return request;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error('Timed out waiting for Install Guard approval');
 }
