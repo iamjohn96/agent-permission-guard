@@ -29,6 +29,7 @@ export type ResolvedPackageMetadata = Readonly<{
   repositoryMissing: boolean;
   provenanceInconsistent: boolean;
   mutableSource: boolean;
+  evidenceComplete: boolean;
 }>;
 
 export type InstallResolution =
@@ -65,7 +66,8 @@ export type InstallRiskSignalCode =
   | 'new_publisher'
   | 'repository_missing'
   | 'provenance_inconsistent'
-  | 'mutable_source';
+  | 'mutable_source'
+  | 'limited_registry_evidence';
 
 export type InstallRiskSignal = Readonly<{
   code: InstallRiskSignalCode;

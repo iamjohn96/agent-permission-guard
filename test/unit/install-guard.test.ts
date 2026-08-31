@@ -279,6 +279,7 @@ function safeMetadata(): ResolvedPackageMetadata {
     repositoryMissing: false,
     provenanceInconsistent: false,
     mutableSource: false,
+    evidenceComplete: true,
   };
 }
 

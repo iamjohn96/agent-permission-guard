@@ -1,6 +1,6 @@
 # Install Guard v0 Implementation Plan
 
-Status: IG0 accepted; IG1 implemented locally and pending Jonny acceptance
+Status: IG0 and IG1 accepted; IG2 implemented locally and pending Jonny acceptance
 Product boundary: an APG module with a separate npm/npx execution adapter
 
 ## Goal
@@ -169,6 +169,8 @@ Implemented locally without a database migration. Install requests use the exist
 - privacy/data-flow documentation
 
 This milestone requires approval before external registry access or dependency changes.
+
+Implemented locally behind an injectable transport using Node's built-in fetch implementation. Automated tests use fake registry responses only. The adapter has not made a live registry request. Its privacy and credential boundary is documented in `docs/npm-registry-data-flow.md`.
 
 ### IG3 — Controlled local execution preview
 

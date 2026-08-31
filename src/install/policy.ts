@@ -18,6 +18,7 @@ const ASK_SIGNALS = new Set<InstallRiskSignalCode>([
   'high_advisory',
   'possible_typosquat',
   'mutable_source',
+  'limited_registry_evidence',
 ]);
 
 export function evaluateInstallPolicy(resolution: InstallResolution): InstallPolicyEvaluation {

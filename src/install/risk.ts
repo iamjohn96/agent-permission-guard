@@ -19,6 +19,7 @@ const POINTS: Readonly<Record<InstallRiskSignalCode, number>> = {
   repository_missing: 20,
   provenance_inconsistent: 20,
   mutable_source: 45,
+  limited_registry_evidence: 25,
 };
 
 export function scoreInstallRisk(resolution: InstallResolution): InstallRiskAssessment {
@@ -44,6 +45,7 @@ export function scoreInstallRisk(resolution: InstallResolution): InstallRiskAsse
   if (metadata.repositoryMissing) addSignal(signals, 'repository_missing', 'metadata');
   if (metadata.provenanceInconsistent) addSignal(signals, 'provenance_inconsistent', 'metadata');
   if (metadata.mutableSource) addSignal(signals, 'mutable_source', 'resolution');
+  if (!metadata.evidenceComplete) addSignal(signals, 'limited_registry_evidence', 'metadata');
 
   return assessmentFor(signals);
 }
