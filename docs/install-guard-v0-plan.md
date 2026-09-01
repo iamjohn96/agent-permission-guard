@@ -1,6 +1,6 @@
 # Install Guard v0 Implementation Plan
 
-Status: IG0–IG3 implemented and accepted locally; IG2 and later remain unpublished
+Status: IG0–IG3 implemented and accepted locally; included in the `0.2.0` release candidate, pending npm publish
 Product boundary: an APG module with a separate npm/npx execution adapter
 
 ## Goal

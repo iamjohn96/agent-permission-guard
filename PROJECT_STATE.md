@@ -2,9 +2,9 @@
 
 ## Current Milestone
 
-IG3 — Controlled Local Execution Preview: complete locally.
+Release R0 — npm release readiness: `0.2.0` candidate verified locally; pending publish.
 
-The immutable execution plan, controlled POSIX runner, `apg install` CLI, approval dashboard lifecycle, audit result, and post-execution verifier are implemented locally. One separately approved real npm installation acceptance test completed in an isolated temporary project.
+The `0.2.0` candidate packages IG0–IG3, including the controlled local install preview. Full tests and a script-free local package dry-run have passed. The npm registry still serves `0.1.3` until the publisher releases `0.2.0`.
 
 ## Completed
 
@@ -23,15 +23,20 @@ The immutable execution plan, controlled POSIX runner, `apg install` CLI, approv
   - explicit `apg install npm|npx` CLI with local one-time approval dashboard and non-success exit behavior
   - exact version and approved SHA-512 integrity verification from npm lockfiles
   - isolated real npm acceptance for `yaml@2.9.0` with lifecycle scripts disabled, exact-save enabled, verified lockfile integrity, and a valid audit hash chain
+- Release R0:
+  - local version and lockfile updated to `0.2.0`
+  - package dry-run confirmed 56 intended files, including compiled Install Guard CLI and dashboard assets
 
 ## In Progress
 
-- No active IG3 implementation work remains.
+- Push the verified `0.2.0` release candidate to GitHub.
+- npm publish remains a separate publisher action.
 
 ## Remaining
 
-- Decide whether to accept the POSIX-only preview or design a Windows runner separately
-- Choose the next separate Work: npm release readiness or macOS M0 local API contract hardening
+- Run the publisher-owned npm release command for `0.2.0`.
+- Decide whether to accept the POSIX-only preview or design a Windows runner separately.
+- Start macOS M0 local API contract hardening after the npm release decision.
 
 ## Important Architecture
 
@@ -57,13 +62,14 @@ The immutable execution plan, controlled POSIX runner, `apg install` CLI, approv
 - Output redaction is bounded and pattern-based, so it cannot guarantee detection of arbitrary unlabeled secrets.
 - The controlled runner preview currently rejects Windows.
 - npm performs dependency metadata and tarball requests itself after approval; APG does not act as an HTTP proxy for each transitive request.
-- npm public version remains `0.1.3`; IG2 and later local work is unpublished.
+- npm public version remains `0.1.3`; the local `0.2.0` release candidate contains IG2 and IG3 and is pending publish.
 
 ## Tests
 
 - Current full local suite: 127 passed, 2 skipped on 2026-09-01.
 - IG3 coverage includes execution plan, plan tamper, parser bypass, fake executable process execution, registry adapter, dashboard approval, timeout, cancellation, output redaction, terminal audit failure, and exact integrity verification.
 - Manual npm acceptance: `yaml@2.9.0`, `--ignore-scripts --save-exact`, exit code 0, verification `verified`, matching approved SHA-512 integrity, valid nine-event audit hash chain. The same temporary audit database also contains the earlier approval-expired attempt.
+- Release candidate package dry-run: `agent-permission-guard@0.2.0`, 56 files, 61,727 bytes compressed, scripts disabled, and no registry access.
 - Default tests must remain network-free; live registry or installation checks are opt-in and approval-gated.
 
 ## Do Not Change
@@ -81,4 +87,4 @@ The immutable execution plan, controlled POSIX runner, `apg install` CLI, approv
 
 ## Next Recommended Task
 
-Start a fresh Work for either npm release readiness or macOS M0 local API contract hardening. Real npx acceptance remains a later independent approval because it executes downloaded package code directly.
+After GitHub push, the publisher may release `0.2.0` to npm with the provided command. Start a fresh Work for macOS M0 local API contract hardening after the release decision. Real npx acceptance remains a later independent approval because it executes downloaded package code directly.
