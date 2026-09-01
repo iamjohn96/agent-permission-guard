@@ -160,6 +160,8 @@ it('rotates an opt-in dashboard state file without an older process removing new
   const firstClient = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
   await waitForStateCreation(statePath);
   const firstState = readDashboardState(statePath);
+  const firstUrl = new URL(firstState.url);
+  const firstToken = new URLSearchParams(firstUrl.hash.slice(1)).get('token');
 
   const secondClient = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
   await waitForStateChange(statePath, firstState.url);
@@ -172,7 +174,12 @@ it('rotates an opt-in dashboard state file without an older process removing new
     headers: { Authorization: `Bearer ${stateToken}` },
   });
   expect(health.status).toBe(200);
-  expect(await health.json()).toEqual({ status: 'ok', api_version: 1 });
+  expect(await health.json()).toEqual({ status: 'ok', api_version: 1, instance_id: state.instance_id });
+
+  const staleCredential = await fetch(`${stateUrl.origin}/api/health`, {
+    headers: { Authorization: `Bearer ${firstToken}` },
+  });
+  expect(staleCredential.status).toBe(401);
 
   await firstClient.close();
   expect(readDashboardState(statePath)).toEqual(state);
@@ -187,12 +194,14 @@ function readDashboardState(path: string): {
   url: string;
   pid: number;
   started_at: string;
+  instance_id: string;
 } {
   const state = JSON.parse(readFileSync(path, 'utf8')) as {
     version: number;
     url: string;
     pid: number;
     started_at: string;
+    instance_id: string;
   };
 
   expect(state.version).toBe(1);
@@ -202,6 +211,7 @@ function readDashboardState(path: string): {
   expect(new URLSearchParams(dashboardUrl.hash.slice(1)).get('token')?.length).toBeGreaterThanOrEqual(32);
   expect(state.pid).toBeGreaterThan(0);
   expect(Number.isNaN(Date.parse(state.started_at))).toBe(false);
+  expect(state.instance_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   return state;
 }
 

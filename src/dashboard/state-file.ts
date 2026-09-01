@@ -16,6 +16,7 @@ export type DashboardState = Readonly<{
   url: string;
   pid: number;
   started_at: string;
+  instance_id: string;
 }>;
 
 export type DashboardStateFile = Readonly<{
@@ -26,12 +27,14 @@ export type DashboardStateFile = Readonly<{
 export function writeDashboardStateFile(
   path: string,
   url: string,
+  instanceId: string,
   pid: number = process.pid,
   startedAt: Date = new Date(),
 ): DashboardStateFile {
   if (path.trim().length === 0) throw new Error('Dashboard state path must not be empty');
   validateDashboardUrl(url);
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Dashboard state PID must be a positive integer');
+  if (!isInstanceId(instanceId)) throw new Error('Dashboard state instance ID must be a UUID');
 
   const absolutePath = resolve(path);
   const parent = dirname(absolutePath);
@@ -42,6 +45,7 @@ export function writeDashboardStateFile(
     url,
     pid,
     started_at: startedAt.toISOString(),
+    instance_id: instanceId,
   };
   const source = `${JSON.stringify(state, null, 2)}\n`;
   const temporaryPath = resolve(parent, `.${basename(absolutePath)}.${pid}.${randomUUID()}.tmp`);
@@ -81,10 +85,31 @@ function validateDashboardUrl(value: string): void {
   } catch (error) {
     throw new Error('Dashboard state URL must be valid', { cause: error });
   }
-  const token = new URLSearchParams(url.hash.slice(1)).get('token');
-  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || token === null || token.length < 32) {
+  const fragment = new URLSearchParams(url.hash.slice(1));
+  const entries = [...fragment.entries()];
+  const token = fragment.get('token');
+  const port = Number(url.port);
+  if (
+    url.protocol !== 'http:'
+    || url.hostname !== '127.0.0.1'
+    || url.username.length > 0
+    || url.password.length > 0
+    || url.pathname !== '/'
+    || url.search.length > 0
+    || !Number.isSafeInteger(port)
+    || port < 1
+    || port > 65_535
+    || entries.length !== 1
+    || entries[0]?.[0] !== 'token'
+    || token === null
+    || !/^[A-Za-z0-9_-]{32,}$/.test(token)
+  ) {
     throw new Error('Dashboard state URL must be a tokenized 127.0.0.1 HTTP URL');
   }
+}
+
+function isInstanceId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 }
 
 function removeOwnedStateFile(path: string, expected: DashboardState): void {
@@ -92,7 +117,13 @@ function removeOwnedStateFile(path: string, expected: DashboardState): void {
     const status = lstatSync(path);
     if (!status.isFile() || status.isSymbolicLink()) return;
     const current = JSON.parse(readFileSync(path, 'utf8')) as Partial<DashboardState>;
-    if (current.version !== expected.version || current.url !== expected.url || current.pid !== expected.pid) return;
+    if (
+      current.version !== expected.version
+      || current.url !== expected.url
+      || current.pid !== expected.pid
+      || current.started_at !== expected.started_at
+      || current.instance_id !== expected.instance_id
+    ) return;
     unlinkSync(path);
   } catch (error) {
     if (!isMissingFileError(error)) {

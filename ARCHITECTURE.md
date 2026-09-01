@@ -105,3 +105,20 @@ The verifier checks working-directory, npm/npx executable, Node runtime, PATH-bo
 The anonymous APG metadata adapter rejects redirects. After approval, npm itself performs dependency and tarball requests; APG fixes the public registry argument and credential-free environment but does not proxy or independently observe every HTTP redirect or transitive endpoint.
 
 APG v0 does not promise automatic rollback or OS-level containment. Lifecycle scripts and npx executables may escape the project boundary unless a future sandbox architecture is accepted.
+
+## macOS Companion Boundary
+
+The future macOS app is a client of the local APG gateway, not a second enforcement engine. The CLI remains authoritative when the app is closed, disconnected, or holding stale state.
+
+```text
+private dashboard.json
+  -> strict native validation
+  -> exact 127.0.0.1 origin + memory-only bearer token
+  -> authenticated /api/health
+  -> state instance_id == health instance_id
+  -> pending approvals and one-time decisions
+```
+
+The state document uses additive version-1 fields. `instance_id` is a random non-secret identity for one dashboard lifetime and is returned by authenticated health. PID and start time are diagnostic only. State replacement invalidates the complete prior connection generation, including in-flight responses and the old token.
+
+Native clients must not read SQLite directly, persist the bearer token, follow redirects, weaken Ask behavior while offline, or treat a custom HTTP header as process identity. A same-user malicious process remains outside the protection offered by private file permissions; stronger OS process identity is deferred to packaged-product hardening.

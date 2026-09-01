@@ -95,3 +95,19 @@ Reason: The approved command must identify the code entry point exactly.
 Trade-offs: Some multi-binary packages are unsupported in v0.
 
 Revisit If: The CLI adds an explicitly parsed and approved `--bin` option.
+
+## Native connections bind state to a dashboard instance ID
+
+Date: 2026-09-02
+
+Context: A state file containing only a URL, PID, and start time cannot safely distinguish PID reuse, stale files, or asynchronous responses from an older dashboard generation.
+
+Decision: Add a random non-secret `instance_id` to the version-1 state document and authenticated health response. A native client must validate both values and invalidate the entire prior connection generation on file replacement or removal. PID and start time remain diagnostic only.
+
+Alternatives: Trust PID/start time; bump the state and API major versions; rely only on bearer-token success.
+
+Reason: Instance matching gives the future macOS companion a stable freshness check without exposing secrets or breaking existing clients that ignore additive JSON fields.
+
+Trade-offs: This is not OS process attestation. A malicious process running as the same user may read the private state file and token.
+
+Revisit If: The packaged desktop product adds code-signing checks, peer-process identity, or OS-protected local credentials.

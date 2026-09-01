@@ -54,6 +54,7 @@ describe('dashboard API security', () => {
     const audit = new AuditQueryService(database, recorder);
     const policies = new LivePolicyController(policyPath);
     const dashboard = await startDashboard({ approvals: service, audit, auditRecorder: recorder, policies, token, port: 0 });
+    expect(dashboard.instanceId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     const url = new URL(dashboard.url);
     const ticket = service.request(safeRequest, 1_000);
 
@@ -74,7 +75,11 @@ describe('dashboard API security', () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(nativeHealth.status).toBe(200);
-      expect(await nativeHealth.json()).toEqual({ status: 'ok', api_version: 1 });
+      expect(await nativeHealth.json()).toEqual({
+        status: 'ok',
+        api_version: 1,
+        instance_id: dashboard.instanceId,
+      });
 
       const wrongOrigin = await fetch(`${url.origin}/api/approvals`, {
         headers: { Origin: 'https://malicious.example', Authorization: `Bearer ${token}` },

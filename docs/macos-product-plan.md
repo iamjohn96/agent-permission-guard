@@ -1,6 +1,6 @@
 # Agent Permission Guard for macOS — Personal Product Plan
 
-Status: architecture proposal for Jonny review  
+Status: product architecture accepted; M0 local API contract hardening implemented locally
 Scope: personal Free and Pro only; Team and Enterprise are explicitly deferred
 
 ## Product decision
@@ -137,9 +137,9 @@ Selecting or integrating a payment/licensing provider is a separate security and
 
 ### M0 — Contract hardening
 
-- Document the local dashboard API for a native client.
-- Add a read-only health endpoint that does not expose secrets.
-- Add integration tests for native-client headers and state-file rotation.
+- Document the local dashboard API and strict state validation for a native client.
+- Provide an authenticated read-only health endpoint with a non-secret dashboard `instance_id`.
+- Add integration tests for origin-less native authorization, instance matching, stale credentials, and state-file rotation.
 
 ### M1 — Native technical preview
 

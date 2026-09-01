@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
@@ -12,6 +12,7 @@ import { LivePolicyController, PolicyConflictError } from '../policy/live-contro
 
 export type DashboardHandle = Readonly<{
   url: string;
+  instanceId: string;
   close(): Promise<void>;
 }>;
 
@@ -24,9 +25,10 @@ export async function startDashboard(options: Readonly<{
   port?: number;
 }>): Promise<DashboardHandle> {
   if (options.token.length < 32) throw new Error('Dashboard token must be at least 32 characters');
+  const instanceId = randomUUID();
   const assets = loadAssets();
   const server = createServer((request, response) => {
-    void handleRequest(request, response, options, assets, server.address()).catch((error: unknown) => {
+    void handleRequest(request, response, { ...options, instanceId }, assets, server.address()).catch((error: unknown) => {
       if (error instanceof DashboardHttpError) return sendJson(response, error.status, { error: error.message });
       if (error instanceof PolicyConflictError) return sendJson(response, 409, { error: error.message });
       if (error instanceof PolicyLoadError) return sendJson(response, 400, { error: error.message });
@@ -52,6 +54,7 @@ export async function startDashboard(options: Readonly<{
 
   return {
     url: `${origin}/#token=${encodeURIComponent(options.token)}`,
+    instanceId,
     close: () => new Promise<void>((resolve, reject) => {
       server.close((error) => error === undefined ? resolve() : reject(error));
     }),
@@ -72,6 +75,7 @@ async function handleRequest(
     auditRecorder: SqliteAuditRecorder;
     policies: LivePolicyController;
     token: string;
+    instanceId: string;
   }>,
   assets: Assets,
   address: ReturnType<ReturnType<typeof createServer>['address']>,
@@ -90,7 +94,7 @@ async function handleRequest(
     if (!isAuthorized(request.headers.authorization, services.token)) return sendJson(response, 401, { error: 'Unauthorized' });
 
     if (request.method === 'GET' && url.pathname === '/api/health') {
-      return sendJson(response, 200, { status: 'ok', api_version: 1 });
+      return sendJson(response, 200, { status: 'ok', api_version: 1, instance_id: services.instanceId });
     }
     if (request.method === 'GET' && url.pathname === '/api/approvals') {
       return sendJson(response, 200, { approvals: services.approvals.listPending() });

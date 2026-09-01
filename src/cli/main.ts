@@ -139,7 +139,13 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   let dashboardState: DashboardStateFile | undefined;
   if (parsed.dashboardStatePath !== undefined) {
     try {
-      dashboardState = writeDashboardStateFile(parsed.dashboardStatePath, dashboard.url);
+      dashboardState = writeDashboardStateFile(
+        parsed.dashboardStatePath,
+        dashboard.url,
+        dashboard.instanceId,
+        process.pid,
+        new Date(),
+      );
       process.stderr.write(`[apg] dashboard state: ${dashboardState.path}\n`);
     } catch (error) {
       approvals.close();
