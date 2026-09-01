@@ -2,9 +2,9 @@
 
 ## Current Milestone
 
-Release R0 — npm release readiness: `0.2.0` candidate verified locally; pending publish.
+Release R0 — npm release readiness: `0.2.0` published.
 
-The `0.2.0` candidate packages IG0–IG3, including the controlled local install preview. Full tests and a script-free local package dry-run have passed. The npm registry still serves `0.1.3` until the publisher releases `0.2.0`.
+Version `0.2.0` packages IG0–IG3, including the controlled local install preview. Full tests and a script-free local package dry-run passed before publish. npm registry verification confirmed `agent-permission-guard@0.2.0`.
 
 ## Completed
 
@@ -29,12 +29,10 @@ The `0.2.0` candidate packages IG0–IG3, including the controlled local install
 
 ## In Progress
 
-- Push the verified `0.2.0` release candidate to GitHub.
-- npm publish remains a separate publisher action.
+- No active release implementation work remains.
 
 ## Remaining
 
-- Run the publisher-owned npm release command for `0.2.0`.
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
 - Start macOS M0 local API contract hardening after the npm release decision.
 
@@ -62,14 +60,14 @@ The `0.2.0` candidate packages IG0–IG3, including the controlled local install
 - Output redaction is bounded and pattern-based, so it cannot guarantee detection of arbitrary unlabeled secrets.
 - The controlled runner preview currently rejects Windows.
 - npm performs dependency metadata and tarball requests itself after approval; APG does not act as an HTTP proxy for each transitive request.
-- npm public version remains `0.1.3`; the local `0.2.0` release candidate contains IG2 and IG3 and is pending publish.
+- npm public version is `0.2.0`, including IG2 and IG3.
 
 ## Tests
 
 - Current full local suite: 127 passed, 2 skipped on 2026-09-01.
 - IG3 coverage includes execution plan, plan tamper, parser bypass, fake executable process execution, registry adapter, dashboard approval, timeout, cancellation, output redaction, terminal audit failure, and exact integrity verification.
 - Manual npm acceptance: `yaml@2.9.0`, `--ignore-scripts --save-exact`, exit code 0, verification `verified`, matching approved SHA-512 integrity, valid nine-event audit hash chain. The same temporary audit database also contains the earlier approval-expired attempt.
-- Release candidate package dry-run: `agent-permission-guard@0.2.0`, 56 files, 61,727 bytes compressed, scripts disabled, and no registry access.
+- Release package dry-run: `agent-permission-guard@0.2.0`, 56 files, 61,727 bytes compressed, scripts disabled, and no registry access. Public registry verification confirmed version `0.2.0` after publish.
 - Default tests must remain network-free; live registry or installation checks are opt-in and approval-gated.
 
 ## Do Not Change
@@ -87,4 +85,4 @@ The `0.2.0` candidate packages IG0–IG3, including the controlled local install
 
 ## Next Recommended Task
 
-After GitHub push, the publisher may release `0.2.0` to npm with the provided command. Start a fresh Work for macOS M0 local API contract hardening after the release decision. Real npx acceptance remains a later independent approval because it executes downloaded package code directly.
+Start a fresh Work for macOS M0 local API contract hardening. Real npx acceptance remains a later independent approval because it executes downloaded package code directly.

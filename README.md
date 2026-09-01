@@ -29,7 +29,7 @@ apg inspect npm yaml@latest
 
 The inspect command sends the package name to the selected registry, resolves an exact version, and prints the local Install Guard risk decision. It does not read `.npmrc`, send npm credentials, download a tarball, request approval, or install the package. See the [npm registry data-flow document](./docs/npm-registry-data-flow.md).
 
-The current `0.2.0` release candidate contains the controlled install preview:
+Version `0.2.0` contains the controlled install preview:
 
 ```sh
 node dist/src/cli/main.js install npm yaml@2.9.0 --ignore-scripts --save-exact
