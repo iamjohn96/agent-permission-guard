@@ -1,6 +1,11 @@
 import type { ApprovalOutcome, ApprovalRequestView } from '../approval/types.js';
 import type { AuditCall, AuditRecorder } from '../audit/recorder.js';
-import type { InstallExecutionResult, InstallPolicyEvaluation, InstallRequest } from './types.js';
+import type {
+  InstallExecutionPlan,
+  InstallExecutionResult,
+  InstallPolicyEvaluation,
+  InstallRequest,
+} from './types.js';
 
 export interface InstallAuditCall {
   markApprovalRequested(request: ApprovalRequestView): void;
@@ -14,7 +19,7 @@ export interface InstallAuditCall {
 export class InstallAuditAdapter {
   constructor(private readonly recorder: AuditRecorder) {}
 
-  begin(request: InstallRequest, evaluation: InstallPolicyEvaluation): InstallAuditCall {
+  begin(request: InstallRequest | InstallExecutionPlan, evaluation: InstallPolicyEvaluation): InstallAuditCall {
     const call = this.recorder.begin({
       serverId: 'install-guard',
       toolName: `${request.runner}_install`,
@@ -34,7 +39,28 @@ export class InstallAuditAdapter {
   }
 }
 
-export function approvalArguments(request: InstallRequest): Readonly<Record<string, unknown>> {
+export function approvalArguments(
+  request: InstallRequest | InstallExecutionPlan,
+): Readonly<Record<string, unknown>> {
+  if ('planHash' in request) {
+    return {
+      runner: request.runner,
+      package: `${request.packageName}@${request.resolvedVersion}`,
+      originalSpecifier: request.originalSpecifier,
+      options: [...request.options],
+      workingDirectory: request.workingDirectory,
+      executable: request.executable.path,
+      runtimeExecutable: request.runtimeExecutable.path,
+      arguments: [...request.arguments],
+      planHash: request.planHash,
+      integrity: request.integrity,
+      registry: request.registry,
+      lifecycleScripts: [...request.lifecycleScripts],
+      packageDownload: true,
+      localProjectMutation: request.runner === 'npm',
+      packageCodeExecution: request.runner === 'npx' || request.lifecycleScripts.length > 0,
+    };
+  }
   return {
     runner: request.runner,
     package: `${request.packageName}@${request.requestedSpecifier}`,
@@ -53,9 +79,16 @@ function adaptCall(call: AuditCall): InstallAuditCall {
       {
         status: result.status,
         exitCode: result.exitCode,
+        signal: result.signal,
         durationMs: result.durationMs,
+        output: result.output === undefined ? undefined : {
+          stdoutBytes: result.output.stdoutBytes,
+          stderrBytes: result.output.stderrBytes,
+          truncated: result.output.truncated,
+        },
+        verification: result.verification,
       },
-      result.status === 'failed',
+      result.status !== 'completed' || result.verification?.status === 'failed',
     ),
     markFailed: (code) => call.markFailed(code),
   };

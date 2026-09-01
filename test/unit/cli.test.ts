@@ -8,8 +8,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { collectDoctorChecks, parseDoctorArguments } from '../../src/cli/doctor.js';
 import { parseInitArguments, runInit } from '../../src/cli/init.js';
 import { parseInspectArguments, runInspect } from '../../src/cli/inspect.js';
+import { parseInstallArguments, runInstall } from '../../src/cli/install.js';
 import { isEntryPointPath, parseProxyArguments } from '../../src/cli/main.js';
+import { LocalInstallExecutionPlanner } from '../../src/install/execution-plan.js';
 import type { NpmRegistryTransport, RegistryResponse } from '../../src/install/npm-registry.js';
+import type {
+  InstallExecutionPlan,
+  InstallExecutionResult,
+  InstallRunnerAdapter,
+} from '../../src/install/types.js';
 
 const temporaryPaths: string[] = [];
 
@@ -195,6 +202,97 @@ describe('apg inspect', () => {
   });
 });
 
+describe('apg install', () => {
+  it('parses supported package options separately from bounded APG controls', () => {
+    expect(parseInstallArguments([
+      'npm',
+      'yaml@latest',
+      '--save-exact',
+      '--registry', 'https://registry.npmjs.org',
+      '--timeout-seconds', '60',
+      '--approval-ttl-seconds', '30',
+      '--dashboard-port', '0',
+    ], '/tmp/project')).toEqual({
+      request: {
+        runner: 'npm',
+        packageName: 'yaml',
+        requestedSpecifier: 'latest',
+        options: ['--save-exact'],
+        workingDirectory: '/tmp/project',
+      },
+      registry: 'https://registry.npmjs.org/',
+      timeoutMs: 60_000,
+      approvalTtlMs: 30_000,
+      policyPath: '.apg/policy.yaml',
+      auditDbPath: '.apg/audit.sqlite',
+      dashboardPort: 0,
+    });
+  });
+
+  it.each([
+    { argv: ['npm'] },
+    { argv: ['pip', 'yaml'] },
+    { argv: ['npm', 'yaml', '--timeout-seconds', '0'] },
+    { argv: ['npm', 'yaml', '--dashboard-port', '70000'] },
+    { argv: ['npm', 'yaml', '--registry', 'https://user:secret@registry.npmjs.org'] },
+    { argv: ['npx', 'yaml', '--ignore-existing'] },
+  ])('rejects unsafe or unsupported install arguments: $argv', ({ argv }) => {
+    expect(() => parseInstallArguments(argv, '/tmp/project')).toThrow(/Usage/);
+  });
+
+  it('runs the install lifecycle through the local dashboard using fake registry and runner only', async () => {
+    const directory = temporaryDirectory();
+    const project = join(directory, 'project');
+    const bin = join(directory, 'bin');
+    const policyPath = join(directory, 'policy.yaml');
+    const auditDbPath = join(directory, 'audit.sqlite');
+    const executable = join(bin, 'npm');
+    const nodeExecutable = join(bin, 'node');
+    mkdirSync(project, { mode: 0o700 });
+    mkdirSync(bin, { mode: 0o700 });
+    writeFileSync(join(project, 'package.json'), '{"name":"fixture","private":true}\n');
+    writeFileSync(executable, '#!/bin/sh\nexit 91\n', { mode: 0o700 });
+    writeFileSync(nodeExecutable, '#!/bin/sh\nexit 90\n', { mode: 0o700 });
+    chmodSync(executable, 0o700);
+    chmodSync(nodeExecutable, 0o700);
+    writeFileSync(policyPath, 'version: 1\nrules: []\n', { mode: 0o600 });
+
+    const output: string[] = [];
+    const errors: string[] = [];
+    const runner = new CliFakeInstallRunner();
+    const running = runInstall(parseInstallArguments([
+      'npm', 'yaml@latest', '--save-exact',
+      '--policy', policyPath,
+      '--audit-db', auditDbPath,
+      '--dashboard-port', '0',
+    ], project), {
+      transport: new InspectFakeTransport(okInstallPackument()),
+      planner: new LocalInstallExecutionPlanner({ environment: { PATH: bin } }),
+      runner,
+      output: { write: (chunk) => { output.push(String(chunk)); return true; } },
+      errorOutput: { write: (chunk) => { errors.push(String(chunk)); return true; } },
+    });
+
+    const dashboard = await waitForInstallDashboard(errors);
+    const pending = await waitForDashboardApproval(dashboard);
+    const approvalResponse = await fetch(`${dashboard.origin}/api/approvals/${pending.id}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${dashboard.token}` },
+    });
+    expect(approvalResponse.status).toBe(200);
+
+    await expect(running).resolves.toMatchObject({ status: 'completed' });
+    expect(runner.plans).toHaveLength(1);
+    expect(runner.plans[0]).toMatchObject({
+      originalSpecifier: 'latest',
+      resolvedVersion: '2.9.0',
+    });
+    expect(output.join('')).toContain('Status: COMPLETED');
+    expect(output.join('')).toContain('direct npm/npx remains outside coverage');
+    expect(errors.join('')).toContain('Direct npm/npx commands bypass APG');
+  });
+});
+
 describe('CLI entry point', () => {
   it('recognizes an npm-style symlink to the packaged executable', () => {
     const directory = temporaryDirectory();
@@ -225,4 +323,76 @@ class InspectFakeTransport implements NpmRegistryTransport {
     if (this.response instanceof Error) throw this.response;
     return this.response;
   }
+}
+
+class CliFakeInstallRunner implements InstallRunnerAdapter {
+  readonly plans: InstallExecutionPlan[] = [];
+
+  async run(plan: InstallExecutionPlan): Promise<InstallExecutionResult> {
+    this.plans.push(plan);
+    return {
+      status: 'completed',
+      exitCode: 0,
+      durationMs: 3,
+      summary: 'fake CLI execution',
+      verification: {
+        status: 'verified',
+        exactPackageVersionObserved: true,
+        approvedIntegrityObserved: true,
+        changedFiles: [],
+        reasonCodes: [],
+      },
+    };
+  }
+}
+
+function okInstallPackument(): RegistryResponse {
+  return {
+    status: 200,
+    contentType: 'application/vnd.npm.install-v1+json',
+    body: {
+      name: 'yaml',
+      'dist-tags': { latest: '2.9.0' },
+      versions: {
+        '2.9.0': {
+          name: 'yaml',
+          version: '2.9.0',
+          hasInstallScript: false,
+          dist: {
+            tarball: 'https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz',
+            integrity: `sha512-${Buffer.alloc(64, 0xaa).toString('base64')}`,
+          },
+        },
+      },
+    },
+  };
+}
+
+async function waitForInstallDashboard(errors: readonly string[]): Promise<Readonly<{
+  origin: string;
+  token: string;
+}>> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const match = errors.join('').match(/(http:\/\/127\.0\.0\.1:\d+\/#token=([^\s]+))/);
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      return { origin: new URL(match[1]).origin, token: decodeURIComponent(match[2]) };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('Timed out waiting for install dashboard');
+}
+
+async function waitForDashboardApproval(
+  dashboard: Readonly<{ origin: string; token: string }>,
+): Promise<Readonly<{ id: string }>> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await fetch(`${dashboard.origin}/api/approvals`, {
+      headers: { Authorization: `Bearer ${dashboard.token}` },
+    });
+    const body = await response.json() as { approvals?: Array<{ id: string }> };
+    const pending = body.approvals?.[0];
+    if (pending !== undefined) return pending;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('Timed out waiting for install approval');
 }

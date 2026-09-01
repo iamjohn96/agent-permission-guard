@@ -16,6 +16,7 @@ import { serveStdioGateway } from '../transport/stdio-downstream.js';
 import { parseDoctorArguments, runDoctor } from './doctor.js';
 import { parseInitArguments, runInit } from './init.js';
 import { parseInspectArguments, runInspect } from './inspect.js';
+import { parseInstallArguments, runInstall } from './install.js';
 
 export type ProxyArguments = Readonly<{
   policyPath: string;
@@ -76,6 +77,11 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
   if (argv[0] === 'inspect') {
     await runInspect(parseInspectArguments(argv.slice(1)));
+    return;
+  }
+  if (argv[0] === 'install') {
+    const result = await runInstall(parseInstallArguments(argv.slice(1)));
+    if (result.status !== 'completed') process.exitCode = 1;
     return;
   }
   if (argv[0] === '--help' || argv[0] === '-h' || argv.length === 0) {
@@ -173,6 +179,7 @@ function generalUsage(): string {
     '  apg init [--directory <path>]',
     '  apg doctor [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>] [--dashboard-state <dashboard.json>] [-- <upstream-command> [args...]]',
     '  apg inspect <npm|npx> <package-spec> [--registry <https-url>]',
+    '  apg install <npm|npx> <package-spec> [supported package options] [--registry <https-url>] [--timeout-seconds <1..900>] [--approval-ttl-seconds <1..3600>] [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>]',
     '  apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] -- <upstream-command> [args...]',
   ].join('\n');
 }

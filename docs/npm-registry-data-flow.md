@@ -1,6 +1,6 @@
 # npm Registry Data Flow
 
-Status: IG2 local design; no live registry request has been executed
+Status: IG2.5 read-only public-registry check and one isolated IG3 real npm installation acceptance completed
 
 ## Purpose
 
@@ -48,6 +48,16 @@ The adapter accepts only:
 - a dist object with a tarball URL
 - an exact requested version or a dist-tag resolved inside the same response
 
+For an IG3 execution plan, the adapter also preserves the selected version's HTTPS tarball URL, SHA-512 integrity value, and declared executable-bin mapping when present. The metadata adapter itself does not fetch the tarball or execute the binary; only the separately approved npm/npx runner may perform those consequences.
+
+## Controlled install network boundary
+
+After one-time approval, `apg install` invokes the approved npm/npx executable with the exact package/version and fixed HTTPS registry argument. The child receives private empty npm configuration, HOME, temporary/cache paths, and an allowlisted environment without parent credentials.
+
+npm itself performs dependency metadata and tarball requests. APG does not proxy each npm HTTP request, does not observe every transitive endpoint, and cannot guarantee that npm applies APG's metadata-adapter redirect policy. The approval prompt therefore treats package download and local mutation/code execution as explicit consequences of the same immutable plan.
+
+After npm exits successfully, APG requires the resulting lockfile to match both the approved top-level version and SHA-512 integrity. This is post-execution detection, not pre-execution containment.
+
 Version ranges are rejected in v0 because APG does not add a semver dependency and should not implement a partial range resolver that appears authoritative.
 
 ## Evidence limitations
@@ -88,6 +98,6 @@ Even after Ask approval, an unavailable response can execute only an exact versi
 - no download-count or search endpoint
 - no typosquat service
 - no tarball download
-- no package installation
+- no real package installation during automated IG3 validation; one separately approved isolated npm acceptance was executed with lifecycle scripts disabled
 - no disk cache
 - no telemetry

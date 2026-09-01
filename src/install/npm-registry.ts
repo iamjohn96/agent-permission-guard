@@ -154,12 +154,16 @@ function resolveResponse(
     return { status: 'contradictory', reason: 'Resolved npm version metadata was inconsistent' };
   }
 
+  const executableBins = normalizeExecutableBins(request.packageName, versionDocument.bin);
   const metadata: ResolvedPackageMetadata = Object.freeze({
     packageName: request.packageName,
     version,
     registry: registry.toString(),
     observedAt: observedAt.toISOString(),
     lifecycleScripts: Object.freeze(versionDocument.hasInstallScript === true ? ['install'] : []),
+    ...(typeof dist.tarball === 'string' ? { tarballUrl: dist.tarball } : {}),
+    ...(typeof dist.integrity === 'string' ? { integrity: dist.integrity } : {}),
+    ...(executableBins === undefined ? {} : { executableBins: Object.freeze(executableBins) }),
     advisories: Object.freeze([]),
     possibleTyposquat: false,
     packageIsNew: false,
@@ -170,6 +174,24 @@ function resolveResponse(
     evidenceComplete: false,
   });
   return { status: 'resolved', metadata };
+}
+
+function normalizeExecutableBins(
+  packageName: string,
+  input: unknown,
+): Readonly<Record<string, string>> | undefined {
+  const defaultName = packageName.includes('/') ? packageName.slice(packageName.lastIndexOf('/') + 1) : packageName;
+  if (typeof input === 'string' && input.length > 0 && defaultName.length > 0) {
+    return { [defaultName]: input };
+  }
+  const record = asRecord(input);
+  if (record === undefined) return undefined;
+  const bins = Object.entries(record).filter(
+    (entry): entry is [string, string] => /^[a-zA-Z0-9._-]+$/.test(entry[0])
+      && typeof entry[1] === 'string'
+      && entry[1].length > 0,
+  );
+  return bins.length === 0 ? undefined : Object.fromEntries(bins);
 }
 
 function resolveVersion(

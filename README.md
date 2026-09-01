@@ -29,6 +29,14 @@ apg inspect npm yaml@latest
 
 The inspect command sends the package name to the selected registry, resolves an exact version, and prints the local Install Guard risk decision. It does not read `.npmrc`, send npm credentials, download a tarball, request approval, or install the package. See the [npm registry data-flow document](./docs/npm-registry-data-flow.md).
 
+The current source checkout also contains the unpublished controlled install preview:
+
+```sh
+node dist/src/cli/main.js install npm yaml@2.9.0 --ignore-scripts --save-exact
+```
+
+This command performs real package download and local project changes only after one-time approval in the printed localhost dashboard. Use it only in a disposable project. Direct `npm` and `npx` commands bypass APG entirely.
+
 ## Install from source
 
 To build the CLI from a local checkout instead:
@@ -68,6 +76,7 @@ APG prints a tokenized localhost dashboard URL to stderr. With the optional `--d
 - Initialize a private starter policy with `apg init` without overwriting existing policy files.
 - Diagnose the local runtime, policy, audit path, dashboard port, and upstream executable with `apg doctor` without executing the upstream command.
 - Inspect npm/npx package metadata and explain an Install Guard decision without downloading or installing a package.
+- Run explicitly routed npm/npx requests through an immutable execution plan, one-time approval, controlled runner, verification, and audit path.
 - Forward allowed `tools/call` requests.
 - Stop denied calls before they reach the upstream server.
 - Support modern MCP `2026-07-28` and legacy `2025-11-25` clients through the official SDK.
@@ -116,6 +125,7 @@ The source-build examples use `node dist/src/cli/main.js`. After the package is 
 apg init
 apg doctor [--dashboard-state ./.apg/dashboard.json] -- <upstream-command>
 apg inspect <npm|npx> <package-spec> [--registry <https-url>]
+apg install <npm|npx> <package-spec> [supported package options] [--registry <https-url>] [--timeout-seconds <1..900>] [--approval-ttl-seconds <1..3600>]
 apg proxy --policy ./.apg/policy.yaml --audit-db ./.apg/audit.sqlite [--dashboard-state ./.apg/dashboard.json] -- <upstream-command> [args...]
 ```
 
@@ -172,6 +182,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting changes. Report suspe
 - If a tool executes successfully and the post-execution outcome write then fails, the gateway cannot undo that external side effect. The durable pre-execution event still records that execution was released.
 - Node.js 24 LTS is the target runtime; development may also work on newer supported Node versions listed in `package.json`.
 - APG currently forwards only `PATH` to upstream processes. MCP servers that require environment credentials are not yet supported by the documented Codex setup.
+- Install Guard's controlled runner preview currently supports POSIX systems only. In addition to automatic tests with known local fake executables, one isolated `yaml@2.9.0` npm installation has completed through the approval, execution, verification, and audit path with lifecycle scripts disabled. Direct `npm` and `npx` commands bypass APG and remain outside its approval, verification, and audit boundary.
+- npm performs transitive metadata and tarball requests itself after approval. APG fixes a credential-free registry/config environment but does not proxy every npm HTTP request or provide OS-level sandboxing.
 
 ## License
 

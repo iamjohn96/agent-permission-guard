@@ -4,7 +4,9 @@ import { evaluateInstallPolicy } from './policy.js';
 import type {
   InstallGuardResult,
   InstallExecutionResult,
+  InstallExecutionPlanner,
   InstallMetadataProvider,
+  InstallPolicyEvaluation,
   InstallRequest,
   InstallResolution,
   InstallRunnerAdapter,
@@ -18,19 +20,36 @@ export class InstallGuardService {
     metadata: InstallMetadataProvider;
     approvals: ApprovalCoordinator;
     audit: InstallAuditAdapter;
+    planner: InstallExecutionPlanner;
     runner: InstallRunnerAdapter;
   }>) {}
 
-  async run(input: InstallRequest, approvalTtlMs: number): Promise<InstallGuardResult> {
+  async run(
+    input: InstallRequest,
+    approvalTtlMs: number,
+    options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
+  ): Promise<InstallGuardResult> {
     const request = snapshotRequest(input);
     const resolution = validateInstallResolution(request, await this.dependencies.metadata.resolve(request));
-    const evaluation = evaluateInstallPolicy(resolution);
-    const audit = this.dependencies.audit.begin(request, evaluation);
+    const baseEvaluation = evaluateInstallPolicy(resolution);
+    const evaluation = executionEvaluation(baseEvaluation, resolution.status === 'resolved');
 
     if (evaluation.effectiveDecision === 'deny') {
+      const audit = this.dependencies.audit.begin(request, evaluation);
       audit.markBlocked('denied');
       return { status: 'denied', evaluation };
     }
+
+    if (resolution.status !== 'resolved') throw new Error('Resolved metadata is required after execution evaluation');
+    let plan;
+    try {
+      plan = await this.dependencies.planner.create(request, resolution.metadata, options.timeoutMs ?? 300_000);
+    } catch {
+      const audit = this.dependencies.audit.begin(request, evaluation);
+      audit.markFailed('install_plan_failed');
+      return { status: 'failed', evaluation };
+    }
+    const audit = this.dependencies.audit.begin(plan, evaluation);
 
     if (evaluation.effectiveDecision === 'ask') {
       let ticket: ApprovalTicket | undefined;
@@ -39,7 +58,7 @@ export class InstallGuardService {
           kind: 'install',
           serverId: 'install-guard',
           toolName: `${request.runner} install`,
-          arguments: approvalArguments(request),
+          arguments: approvalArguments(plan),
           risk: evaluation.risk,
           reasonCodes: evaluation.reasonCodes,
         }, approvalTtlMs);
@@ -50,12 +69,12 @@ export class InstallGuardService {
         throw error;
       }
       if (ticket === undefined) throw new Error('Install approval ticket was not created');
-      const outcome = await ticket.outcome;
+      const outcome = await waitForApproval(ticket, options.signal);
       audit.markApprovalResolved(ticket.request.id, outcome);
       if (outcome !== 'approved') {
         const status = outcomeStatus(outcome);
         audit.markBlocked(status);
-        return { status, evaluation };
+        return { status, evaluation, plan };
       }
     }
 
@@ -63,12 +82,12 @@ export class InstallGuardService {
     let execution: InstallExecutionResult;
     try {
       execution = await this.dependencies.runner.run(
-        request,
-        resolution.status === 'resolved' ? resolution.metadata : undefined,
+        plan,
+        options.signal,
       );
     } catch {
       audit.markFailed('install_runner_failed');
-      return { status: 'failed', evaluation };
+      return { status: 'failed', evaluation, plan };
     }
     try {
       audit.markCompleted(execution);
@@ -78,10 +97,48 @@ export class InstallGuardService {
       } catch {
         // The caller still receives the completed execution result and an explicit audit failure.
       }
-      return { status: 'audit_failed', evaluation, execution };
+      return { status: 'audit_failed', evaluation, plan, execution };
     }
-    return { status: execution.status, evaluation, execution };
+    const status = execution.status === 'completed' && execution.verification?.status === 'failed'
+      ? 'verification_failed'
+      : execution.status;
+    return { status, evaluation, plan, execution };
   }
+}
+
+async function waitForApproval(
+  ticket: ApprovalTicket,
+  signal: AbortSignal | undefined,
+): Promise<ApprovalOutcome> {
+  if (signal?.aborted === true) ticket.cancel();
+  const cancel = () => ticket.cancel();
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    return await ticket.outcome;
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
+function executionEvaluation(
+  evaluation: InstallPolicyEvaluation,
+  hasResolvedMetadata: boolean,
+): InstallPolicyEvaluation {
+  if (evaluation.effectiveDecision === 'deny') return evaluation;
+  if (!hasResolvedMetadata) {
+    return {
+      ...evaluation,
+      effectiveDecision: 'deny',
+      reasonCodes: Object.freeze([...evaluation.reasonCodes, 'execution_requires_resolved_metadata']),
+    };
+  }
+  return {
+    ...evaluation,
+    effectiveDecision: 'ask',
+    reasonCodes: evaluation.reasonCodes.includes('local_install_execution')
+      ? evaluation.reasonCodes
+      : Object.freeze([...evaluation.reasonCodes, 'local_install_execution']),
+  };
 }
 
 function snapshotRequest(request: InstallRequest): InstallRequest {
@@ -114,6 +171,9 @@ function snapshotMetadata(metadata: ResolvedPackageMetadata): ResolvedPackageMet
   return Object.freeze({
     ...metadata,
     lifecycleScripts: Object.freeze([...metadata.lifecycleScripts]),
+    ...(metadata.executableBins === undefined
+      ? {}
+      : { executableBins: Object.freeze({ ...metadata.executableBins }) }),
     advisories: Object.freeze(metadata.advisories.map((item) => Object.freeze({ ...item }))),
   });
 }

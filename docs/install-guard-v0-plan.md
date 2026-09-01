@@ -1,6 +1,6 @@
 # Install Guard v0 Implementation Plan
 
-Status: IG0–IG2 accepted; IG2.5 inspect CLI implemented locally and pending Jonny acceptance
+Status: IG0–IG3 implemented and accepted locally; IG2 and later remain unpublished
 Product boundary: an APG module with a separate npm/npx execution adapter
 
 ## Goal
@@ -180,6 +180,8 @@ Implemented locally behind an injectable transport using Node's built-in fetch i
 - manual local acceptance scenario
 
 Actual install execution changes the local project and dependency state. It requires explicit approval during development acceptance testing.
+
+IG3 now includes an immutable execution plan, exact resolved approval identity, mandatory Ask for local execution, registry integrity/bin evidence, a controlled POSIX process runner, `apg install`, bounded redacted output, timeout/cancellation, and pre/post verification. Automated tests use fake registry responses, fake runners, and locally generated known executables. A separately approved manual acceptance installed `yaml@2.9.0` once in an isolated temporary project with `--ignore-scripts --save-exact`; the command completed, the approved SHA-512 integrity was observed in the lockfile, and the audit hash chain remained valid.
 
 ## Definition of done for v0
 

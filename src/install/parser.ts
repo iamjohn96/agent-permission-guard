@@ -3,7 +3,7 @@ import { isAbsolute } from 'node:path';
 import type { InstallRequest, InstallRunner } from './types.js';
 
 const NPM_OPTIONS = new Set(['--save-dev', '--save-exact', '--ignore-scripts']);
-const NPX_OPTIONS = new Set(['--yes', '--ignore-existing']);
+const NPX_OPTIONS = new Set(['--yes']);
 const UNSAFE_TOKEN = /[;&|`$<>\n\r\0]/;
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const SPECIFIER = /^[a-zA-Z0-9*^~<>=|.+-]+$/;
