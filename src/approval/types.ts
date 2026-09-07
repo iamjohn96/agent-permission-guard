@@ -1,4 +1,5 @@
 import type { RiskBand } from '../risk/types.js';
+import type { McpIdentityApprovalView } from '../identity/mcp-identity.js';
 
 export type ApprovalOutcome = 'approved' | 'denied' | 'expired' | 'cancelled';
 
@@ -8,6 +9,7 @@ export type ApprovalRequestView = Readonly<{
   serverId: string;
   toolName: string;
   arguments: unknown;
+  identity?: McpIdentityApprovalView;
   risk: Readonly<{
     score: number;
     band: RiskBand;

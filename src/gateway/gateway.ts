@@ -7,8 +7,8 @@ import {
 } from '@modelcontextprotocol/server';
 
 import {
-  createToolCallContext,
   ForwardAllInterceptor,
+  prepareToolCall,
   type CallInterceptor,
 } from './call-interceptor.js';
 import { NoopAuditRecorder, type AuditRecorder } from '../audit/recorder.js';
@@ -16,6 +16,7 @@ import type { ApprovalCoordinator, ApprovalOutcome } from '../approval/types.js'
 import type { GatewayServer } from './types.js';
 import { connectStdioUpstream } from '../transport/stdio-upstream.js';
 import type { StdioUpstreamConfig } from '../transport/types.js';
+import { McpIdentityAuthority } from '../identity/mcp-identity.js';
 import { APG_VERSION } from '../version.js';
 
 export async function createGateway(
@@ -23,6 +24,7 @@ export async function createGateway(
   interceptor: CallInterceptor = new ForwardAllInterceptor(),
   audit: AuditRecorder = new NoopAuditRecorder(),
   approval?: Readonly<{ coordinator: ApprovalCoordinator; getTtlMs(): number }>,
+  identityAuthority: McpIdentityAuthority = new McpIdentityAuthority(),
 ): Promise<GatewayServer> {
   const upstream = await connectStdioUpstream(upstreamConfig);
   const listedTools = await upstream.client.listTools();
@@ -50,7 +52,14 @@ export async function createGateway(
 
       try {
         const tool = toolsByName.get(request.params.name);
-        const context = createToolCallContext(upstreamConfig.serverId, request.params, tool?.annotations);
+        const prepared = prepareToolCall(
+          upstreamConfig.serverId,
+          request.params,
+          tool?.annotations,
+          tool?.inputSchema,
+          identityAuthority,
+        );
+        const context = prepared.context;
         const decision = await interceptor.evaluate(context);
         const auditCall = audit.begin(context, decision);
 
@@ -68,6 +77,7 @@ export async function createGateway(
             serverId: context.serverId,
             toolName: context.toolName,
             arguments: context.arguments,
+            ...(context.identity === undefined ? {} : { identity: context.identity.approvalView }),
             risk: decision.evaluation?.risk ?? { score: 0, band: 'low', signals: [] },
             reasonCodes: decision.evaluation?.reasonCodes ?? ['interceptor_decision'],
           }, approval.getTtlMs());
@@ -106,7 +116,7 @@ export async function createGateway(
 
         let result: CallToolResult;
         try {
-          result = await upstream.client.callTool(request.params, {
+          result = await upstream.client.callTool(prepared.dispatchParams, {
             signal: callAbort.signal,
           });
         } catch (error) {

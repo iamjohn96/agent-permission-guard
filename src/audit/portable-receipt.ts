@@ -47,7 +47,7 @@ export const PortableReceiptEnvelopeSchema = z.object({
   format: z.object({
     name: z.literal('apg-portable-evidence'),
     majorVersion: z.literal(1),
-    minorVersion: z.literal(0),
+    minorVersion: z.union([z.literal(0), z.literal(1)]),
     canonicalization: z.literal('apg-canonical-json-v1'),
   }).strict(),
   actionId: z.uuid(),
@@ -237,7 +237,7 @@ function parseReceiptEvent(row: ReceiptEventRow): ParsedReceiptEvent {
 
 function legacyEnvelope(toolCall: ToolCallRow): PortableReceiptEnvelope {
   return PortableReceiptEnvelopeSchema.parse({
-    ...baseEnvelope(toolCall.id, 'legacy_incomplete'),
+    ...baseEnvelope(toolCall.id, 'legacy_incomplete', 0),
     legacy: {
       status: safeStatus(toolCall.status),
       startedAt: toolCall.started_at,
@@ -258,7 +258,7 @@ function receiptEnvelope(
     ? authorized ? 'incomplete' : 'authorization_only'
     : isIncompleteOutcome(outcome.receipt) ? 'incomplete' : 'complete';
   return PortableReceiptEnvelopeSchema.parse({
-    ...baseEnvelope(toolCall.id, completeness),
+    ...baseEnvelope(toolCall.id, completeness, authorization.receipt.schema.minorVersion),
     authorization: { receipt: authorization.receipt, digest: authorization.digest },
     ...(outcome === undefined ? {} : { outcome: { receipt: outcome.receipt, digest: outcome.digest } }),
     localEvidence: localEvidence([
@@ -271,12 +271,13 @@ function receiptEnvelope(
 function baseEnvelope(
   actionId: string,
   completeness: PortableReceiptEnvelope['completeness'],
+  minorVersion: 0 | 1,
 ): Omit<PortableReceiptEnvelope, 'localEvidence'> {
   return {
     format: {
       name: 'apg-portable-evidence',
       majorVersion: 1,
-      minorVersion: 0,
+      minorVersion,
       canonicalization: 'apg-canonical-json-v1',
     },
     actionId,
@@ -310,16 +311,23 @@ function assertEnvelopeRelationships(envelope: PortableReceiptEnvelope): void {
       throw new Error('Legacy receipt envelope has inconsistent evidence');
     }
     if (envelope.localEvidence.proofs.length !== 0) throw new Error('Legacy evidence cannot contain receipt proofs');
+    if (envelope.format.minorVersion !== 0) throw new Error('Legacy evidence must use envelope schema 1.0');
     return;
   }
   if (envelope.legacy !== undefined || authorization === undefined) {
     throw new Error('Portable receipt envelope is missing Authorization evidence');
   }
   if (authorization.receipt.action.id !== envelope.actionId) throw new Error('Authorization action ID mismatch');
+  if (envelope.format.minorVersion !== authorization.receipt.schema.minorVersion) {
+    throw new Error('Envelope and Authorization Receipt versions do not match');
+  }
   if (!digestEquals(receiptDigest(authorization.receipt), authorization.digest)) {
     throw new Error('Authorization Receipt digest is invalid');
   }
   if (outcome !== undefined) {
+    if (outcome.receipt.schema.minorVersion !== authorization.receipt.schema.minorVersion) {
+      throw new Error('Authorization and Outcome Receipt versions do not match');
+    }
     if (authorization.receipt.authorization.status !== 'authorized') {
       throw new Error('Outcome Receipt cannot extend a blocked authorization');
     }

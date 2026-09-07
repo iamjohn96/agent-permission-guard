@@ -7,6 +7,7 @@ import type {
   ApprovalRequestView,
   ApprovalTicket,
 } from './types.js';
+import type { McpIdentityApprovalView } from '../identity/mcp-identity.js';
 
 type PendingEntry = {
   request: ApprovalRequestView;
@@ -32,6 +33,9 @@ export class LocalApprovalService implements ApprovalCoordinator {
     const request: ApprovalRequestView = Object.freeze({
       ...input,
       arguments: redactForAudit(input.arguments),
+      ...(input.identity === undefined
+        ? {}
+        : { identity: redactForAudit(input.identity) as McpIdentityApprovalView }),
       id,
       requestedAt: requestedAt.toISOString(),
       expiresAt: new Date(requestedAt.getTime() + ttlMs).toISOString(),

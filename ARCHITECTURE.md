@@ -24,6 +24,32 @@ Install Guard is an APG module, not a separate product or repository. It shares 
 - local dashboard
 - SQLite audit recorder and hash chain
 
+### Exact MCP Identity Foundation
+
+The MCP gateway prepares one cloned, deeply frozen request snapshot before policy evaluation. That same
+snapshot is the only payload forwarded upstream, preventing the evaluated parameters and dispatched
+parameters from diverging.
+
+An `IdentityAuthority` may apply an explicitly registered, APG-built profile to the configured server ID
+and tool name. Profiles use closed typed field definitions and return only bounded safe claims. They do
+not hash arbitrary arguments or trust upstream descriptions and JSON Schema to classify secrets.
+
+Identity assurance is explicit:
+
+- `structural_only`: configured server ID and operation only
+- `adapter_scoped`: a reviewed safe subset, with unbound behavior declared
+- `adapter_action_exact`: all behavior-determining parameters accepted by a reviewed profile
+- `execution_plan_exact`: a separate immutable execution plan, currently used by Install Guard
+
+Unknown fields, invalid types, schema drift, unsupported request metadata, and profile failures cannot
+produce exact assurance. The common implementation contains no production MCP profile, so normal MCP
+calls remain `structural_only` today. A policy-selectable exact requirement and each production profile
+remain separate approval boundaries.
+
+The audit recorder, rather than a generic interceptor, decides whether a runtime identity result came
+from the trusted authority. Portable receipt schema 1.1 carries profile evidence; existing schema 1.0
+receipts continue to verify and are never upgraded retroactively. No database migration is required.
+
 ### Install Guard
 
 - strict npm/npx parser
@@ -87,6 +113,8 @@ Authenticated registries are out of scope until a separate credential architectu
 - Audit: local SQLite database with append-only hash-chained events
 - Execution plan: immutable in memory and represented by a SHA-256 plan hash in approval/audit data
 - Raw stdout/stderr and previews: not persisted; audit stores only byte counts and truncation status. Bounded pattern-redacted previews exist only in the in-memory execution result.
+- MCP prepared request and identity result: immutable memory for one call; only profile-approved safe
+  claims enter receipt evidence
 
 ## Failure Handling
 

@@ -2,11 +2,11 @@
 
 ## Current Milestone
 
-ER1 — Portable Unsigned Evidence: implemented locally; awaiting review and commit approval.
+Exact MCP Identity shared foundation: implemented locally; awaiting review and commit approval.
 
-APG now finalizes a versioned Authorization Receipt before dispatch and a linked Outcome Receipt after
-bounded observation. Explicit export and offline verification preserve honest `portable_unsigned`
-assurance without claiming issuer authentication, runtime attestation, or protection outside an adapter.
+The accepted architecture now has common machinery for reviewed MCP profiles, immutable approval-to-
+dispatch request binding, receipt schema 1.1 profile evidence, and synthetic network-free coverage. No
+production MCP profile or production exact-identity policy rule has been added.
 
 ## Completed
 
@@ -44,7 +44,7 @@ assurance without claiming issuer authentication, runtime attestation, or protec
   - durable pre-dispatch evidence and incomplete post-audit failure semantics
   - deferred signing-provider and external-anchor boundaries
   - risk register, mitigations, release-blocking controls, ER1 scope, and security test strategy
-- ER1 local implementation:
+- ER1 portable unsigned evidence, committed and pushed:
   - strict version-1 Authorization and Outcome Receipt schemas
   - exact validated YAML policy digest and centralized Install Guard built-in policy digest
   - durable authorization-before-dispatch and approval state-machine guards
@@ -59,15 +59,24 @@ assurance without claiming issuer authentication, runtime attestation, or protec
 
 ## In Progress
 
-- ER1 source, tests, CLI, Dashboard Action ID display, and documentation are complete locally and await
-  review. No signing key, database migration, dependency, external anchor, or external service was added.
+- Exact MCP Identity shared foundation is complete locally:
+  - cloned and deeply frozen `PreparedToolCall` is the only upstream dispatch payload
+  - centralized `McpIdentityAuthority` with runtime-trusted result provenance
+  - closed string, enum, integer, boolean, null, ordered-list, and optional field definitions
+  - exact, partial, rejected, and structural identity invariants
+  - profile manifest and optional observed-schema digests
+  - profile-bearing receipt/envelope schema 1.1 with existing 1.0 compatibility
+  - trusted safe identity shown separately in approval data and Dashboard labels
+  - synthetic tests for mutation, schema drift, unknown fields, spoofing, privacy, and receipt verification
+- Source, tests, Dashboard labels, architecture, and state are awaiting review. No production profile,
+  production policy semantic change, dependency, database migration, external service, or secret handling
+  was added.
 
 ## Remaining
 
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
-- Commit and push ER1 after review and explicit approval.
-- Design adapter-specific safe identity projections for exact MCP parameter binding before signing weak
-  structural-only evidence.
+- Review, commit, and push the Exact MCP Identity shared foundation after explicit approval.
+- Review each production MCP profile separately before it can emit exact assurance.
 - Select signing and trust architecture only after receipt semantics, verifier behavior, and identity
   assurance are accepted.
 
@@ -116,12 +125,21 @@ assurance without claiming issuer authentication, runtime attestation, or protec
   `legacy_incomplete`; receipts do not authenticate an APG build or verified human identity.
 - Generic MCP portable identity is currently `structural_only`; arbitrary parameter values are omitted
   to avoid secret leakage. Install Guard receipts retain exact execution-plan identity.
+- MCP policy evaluation and upstream dispatch now share one cloned, deeply frozen prepared snapshot.
+- General key-name redaction is not a safe exact-identity projection. Exact assurance requires a trusted
+  profile that binds every behavior-determining field and rejects unknown fields.
+- The common registry intentionally contains no production MCP profile. Configured server identity is
+  `configured_label_only`, not executable or publisher provenance.
 - The local SHA-256 event chain can be recomputed by an actor with full database write access; stronger
   issuer and history guarantees require a separately approved signing and anchoring architecture.
 
 ## Tests
 
-- Current full local suite: 140 passed, 2 skipped on 2026-09-07.
+- Current full local suite: 147 passed, 2 skipped on 2026-09-07.
+- Exact MCP Identity focused coverage: 7 synthetic tests covering deterministic typed identity, frozen
+  dispatch, field mutation, ordered lists, invalid types, unknown fields, request metadata, schema drift,
+  required-exact failure, partial privacy, unsafe profile definitions, assurance spoofing, approval
+  projection, receipt schema 1.1, and offline verification.
 - ER1 focused suite: 63 passed across receipts, audit state transitions, Install Guard integration,
   policy identity, and Dashboard state.
 - IG3 coverage includes execution plan, plan tamper, parser bypass, fake executable process execution, registry adapter, dashboard approval, timeout, cancellation, output redaction, terminal audit failure, and exact integrity verification.
@@ -147,8 +165,8 @@ assurance without claiming issuer authentication, runtime attestation, or protec
 
 ## Next Recommended Task
 
-Review the ER1 diff, run final local verification, then commit and push only after explicit approval.
-After ER1 lands, prepare an Architecture Check for adapter-specific safe MCP identity projections; do not
-add signing until exact-versus-structural identity semantics are accepted. Signing keys, database
-migrations, dependencies, external anchors, and public cryptographic-attestation claims remain separate
-approval boundaries.
+Review the Exact MCP Identity shared-foundation diff, then commit and push only after explicit approval.
+After it lands, choose one production MCP tool for a focused profile Architecture Check covering tool
+semantics, sensitive fields, account/target identity, schema drift, and consequence boundaries. Production
+policy enforcement, signing keys, database migrations, dependencies, external anchors, and public
+cryptographic-attestation claims remain separate approval boundaries.

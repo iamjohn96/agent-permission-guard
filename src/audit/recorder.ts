@@ -7,6 +7,7 @@ import type { ApprovalOutcome, ApprovalRequestView } from '../approval/types.js'
 import type { Decision } from '../policy/schema.js';
 import type { RiskBand } from '../risk/types.js';
 import type { AuditDatabase } from '../db/database.js';
+import { isTrustedMcpIdentityResult } from '../identity/mcp-identity.js';
 import { canonicalJson } from './canonical-json.js';
 import { redactForAudit } from './redaction.js';
 import {
@@ -77,7 +78,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
     const id = randomUUID();
     const startedAt = this.now();
     const evaluation = normalizeEvaluation(decision);
-    const receiptContext = decision.receipt ?? fallbackReceiptContext(context);
+    const receiptContext = trustedReceiptContext(context, decision.receipt);
     const redactedArguments = redactForAudit(context.arguments);
     const insert = this.database.transaction(() => {
       this.database.prepare(`
@@ -503,6 +504,32 @@ function fallbackReceiptContext(context: ToolCallContext): ReceiptContext {
       evaluatorName: 'interceptor_fallback',
       evaluatorVersion: '1',
     },
+  };
+}
+
+function trustedReceiptContext(
+  context: ToolCallContext,
+  proposed: ReceiptContext | undefined,
+): ReceiptContext {
+  const fallback = proposed ?? fallbackReceiptContext(context);
+  const trustedIdentity = isTrustedMcpIdentityResult(context.identity) ? context.identity : undefined;
+  if (trustedIdentity === undefined && fallback.boundary !== 'mcp_proxy_call') return fallback;
+
+  const identity = trustedIdentity ?? {
+    assurance: 'structural_only' as const,
+    identityMaterial: { serverId: context.serverId, toolName: context.toolName },
+  };
+  const identityEvidence = trustedIdentity?.evidence;
+  return {
+    adapter: 'mcp_proxy',
+    adapterVersion: '1',
+    operation: safeIdentifier(context.toolName),
+    boundary: 'mcp_proxy_call',
+    identityAssurance: identity.assurance,
+    identityMaterial: identity.identityMaterial,
+    subject: context.serverId,
+    ...(identityEvidence === undefined ? {} : { identityEvidence }),
+    policy: fallback.policy,
   };
 }
 

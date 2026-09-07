@@ -60,5 +60,16 @@ receipts bind the exact approved execution plan by its existing plan hash and di
 package identity needed to understand the action.
 
 Generic MCP receipts currently use `structural_only` identity because APG cannot safely assume which
-arbitrary tool parameters contain secrets. Exact portable MCP parameter identity requires a separately
-reviewed, adapter-specific safe projection. A signature would not remove this limitation.
+arbitrary tool parameters contain secrets. APG now has common support for explicitly registered,
+versioned safe profiles, but ships no production MCP profile. Unknown and production tools therefore
+remain structural today.
+
+A profile-bearing receipt uses schema 1.1 and declares one of these identities:
+
+- `adapter_scoped`: exact digest of a reviewed safe subset, with omitted behavior clearly declared
+- `adapter_action_exact`: every behavior-determining parameter accepted and bound by the profile
+
+Profile evidence includes only typed, allowlisted safe claims, the profile manifest digest, coverage, and
+configured-label server assurance. It never treats general redaction output or an upstream JSON Schema as
+proof that arguments are safe. Existing schema-1.0 receipts continue to verify without being upgraded.
+A signature would not remove these privacy or coverage limitations.

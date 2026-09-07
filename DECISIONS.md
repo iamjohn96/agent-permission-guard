@@ -111,3 +111,55 @@ Reason: Instance matching gives the future macOS companion a stable freshness ch
 Trade-offs: This is not OS process attestation. A malicious process running as the same user may read the private state file and token.
 
 Revisit If: The packaged desktop product adds code-signing checks, peer-process identity, or OS-protected local credentials.
+
+## Exact MCP identity requires a trusted profile and one immutable dispatch snapshot
+
+Date: 2026-09-07
+
+Context: Generic MCP arguments can contain secrets and arbitrary private data. ER1 therefore records only
+structural MCP identity, while the gateway previously evaluated a cloned arguments object but forwarded
+the original request parameters.
+
+Decision: Prepare one cloned, deeply frozen call snapshot and use it for policy evaluation, approval, and
+upstream dispatch. Only the centralized identity authority can elevate a call above structural assurance.
+It accepts explicitly registered, APG-built, versioned profiles with closed typed field definitions.
+`adapter_action_exact` requires complete behavior-parameter coverage; unknown fields, type failures,
+schema drift, unsupported request metadata, or profile failure reject exactness. The first implementation
+ships no production profile and changes no production policy rule semantics.
+
+Alternatives: Hash redacted arguments; trust upstream JSON Schema annotations; allow arbitrary
+user-authored projection selectors; add secret commitments immediately.
+
+Reason: A safe subset digest is not exact identity, and key-name redaction cannot classify arbitrary
+secrets. A small trusted profile boundary makes exactness reviewable while preserving structural fallback
+for unknown tools.
+
+Trade-offs: Most MCP calls remain structural until a production profile is reviewed. The configured
+server ID is still only a label, not binary provenance, and tools whose credential arguments affect
+account, target, or behavior may not qualify for portable exact identity.
+
+Revisit If: APG adds reviewed production profiles, principal identity, server executable provenance,
+user-defined profiles, or selective-disclosure commitments.
+
+## MCP profile evidence uses receipt schema 1.1 without a database migration
+
+Date: 2026-09-07
+
+Context: Exact and partial MCP projections need profile identity, safe claims, coverage, schema-drift
+evidence, and rejection status that version-1.0 receipts do not contain.
+
+Decision: New profile-bearing receipts and their portable envelope use minor version 1. Existing
+non-profile receipts remain version 1.0. The verifier supports both exact variants, checks their version
+relationship and identity invariants, and never upgrades historical evidence. Additive receipt events
+carry the data without changing the SQLite schema.
+
+Alternatives: Overload the version-1.0 action digest; bump the major version; migrate persistent tables.
+
+Reason: A minor version makes the semantic addition explicit while retaining existing receipt bytes and
+avoiding an unnecessary persistent-data migration.
+
+Trade-offs: Older verifiers reject 1.1 profile receipts, and the verifier maintains an explicit 1.0/1.1
+compatibility union.
+
+Revisit If: Future evidence cannot fit additive receipt-finalization events or changes the meaning of an
+existing required field.

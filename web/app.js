@@ -48,8 +48,30 @@ function renderApprovals(requests) {
     top.append(title, element('span', `risk risk-${request.risk.band}`, `${request.risk.score} · ${request.risk.band}`));
     const meta = element('div', 'meta');
     meta.append(element('span', '', `Expires ${new Date(request.expiresAt).toLocaleTimeString()}`), element('span', '', request.reasonCodes.join(' · ')));
+    let identity;
+    if (request.identity) {
+      const identityLabel = {
+        adapter_action_exact: 'Exact adapter action',
+        adapter_scoped: 'Safe subset',
+        structural_only: 'Structure only',
+      }[request.identity.assurance] || 'Unknown';
+      const profile = request.identity.profileId
+        ? ` · ${request.identity.profileId}@${request.identity.profileVersion}`
+        : '';
+      identity = element('div', `identity identity-${request.identity.assurance}`);
+      identity.append(
+        element('strong', '', `Identity: ${identityLabel}`),
+        element('span', '', `Coverage: ${request.identity.parameterCoverage}${profile}`),
+      );
+    }
     const pre = element('pre');
-    pre.textContent = JSON.stringify(request.arguments, null, 2);
+    pre.textContent = JSON.stringify(
+      request.identity?.safeClaims?.length
+        ? { safeIdentityClaims: request.identity.safeClaims }
+        : { redactedArguments: request.arguments },
+      null,
+      2,
+    );
     const actions = element('div', 'actions');
     const deny = element('button', 'deny', 'Deny');
     const approve = element('button', 'approve', 'Approve once');
@@ -57,7 +79,7 @@ function renderApprovals(requests) {
     deny.addEventListener('click', () => decide(request.id, 'deny', deny, approve));
     approve.addEventListener('click', () => decide(request.id, 'approve', deny, approve));
     actions.append(deny, approve);
-    card.append(top, meta, pre, actions);
+    card.append(top, meta, ...(identity ? [identity] : []), pre, actions);
     queue.append(card);
   }
 }

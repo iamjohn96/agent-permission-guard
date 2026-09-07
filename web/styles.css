@@ -38,6 +38,10 @@ button:disabled { cursor: wait; opacity: .55; }
 .risk-medium { background: #3e3215; color: #f2c75c; }
 .risk-high, .risk-critical { background: #431e1e; color: #ff8989; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 18px 0 12px; color: #78837d; font-size: 12px; }
+.identity { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; margin: 0 0 12px; padding: 11px 13px; border: 1px solid #303a35; border-radius: 9px; color: #b8c4bd; background: #0b100d; font-size: 12px; }
+.identity-adapter_action_exact { border-color: #2d7654; color: #76e6ad; }
+.identity-adapter_scoped { border-color: #665724; color: #e0c66d; }
+.identity-structural_only { border-color: #5b3636; color: #dc9292; }
 pre { max-height: 260px; overflow: auto; margin: 0 0 18px; padding: 16px; border: 1px solid #202924; border-radius: 10px; background: #080c09; color: #b9c6bf; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .actions { justify-content: flex-end; }
 .approve { background: #40df9b; color: #052016; }

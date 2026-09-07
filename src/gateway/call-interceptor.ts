@@ -1,13 +1,24 @@
-import type { CallToolRequestParams, ToolAnnotations } from '@modelcontextprotocol/server';
+import type { CallToolRequestParams, Tool } from '@modelcontextprotocol/server';
 
 import type { ReceiptContext } from '../audit/receipt.js';
+import {
+  McpIdentityAuthority,
+  type McpIdentityResult,
+  type PreparedMcpIdentity,
+} from '../identity/mcp-identity.js';
 import type { PolicyEvaluation } from '../policy/evaluator.js';
 
 export type ToolCallContext = Readonly<{
   serverId: string;
   toolName: string;
   arguments: Readonly<Record<string, unknown>>;
-  annotations?: ToolAnnotations;
+  annotations?: NonNullable<Tool['annotations']>;
+  identity?: McpIdentityResult;
+}>;
+
+export type PreparedToolCall = Readonly<{
+  context: ToolCallContext;
+  dispatchParams: CallToolRequestParams;
 }>;
 
 export type InterceptorDecision =
@@ -28,26 +39,33 @@ export class ForwardAllInterceptor implements CallInterceptor {
 export function createToolCallContext(
   serverId: string,
   params: CallToolRequestParams,
-  annotations?: ToolAnnotations,
+  annotations?: NonNullable<Tool['annotations']>,
 ): ToolCallContext {
-  const clonedArguments = structuredClone(params.arguments ?? {});
-
-  return Object.freeze({
-    serverId,
-    toolName: params.name,
-    arguments: deepFreeze(clonedArguments),
-    ...(annotations === undefined ? {} : { annotations }),
-  });
+  return prepareToolCall(serverId, params, annotations).context;
 }
 
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) {
-    return value;
-  }
+export function prepareToolCall(
+  serverId: string,
+  params: CallToolRequestParams,
+  annotations?: NonNullable<Tool['annotations']>,
+  inputSchema?: Tool['inputSchema'],
+  identityAuthority: McpIdentityAuthority = new McpIdentityAuthority(),
+  identityRequirement: 'any' | 'exact' = 'any',
+): PreparedToolCall {
+  const prepared: PreparedMcpIdentity = identityAuthority.prepare(
+    serverId,
+    params,
+    inputSchema,
+    identityRequirement,
+  );
+  const clonedArguments = prepared.dispatchParams.arguments ?? {};
 
-  for (const nested of Object.values(value)) {
-    deepFreeze(nested);
-  }
-
-  return Object.freeze(value);
+  const context = Object.freeze({
+    serverId,
+    toolName: prepared.dispatchParams.name,
+    arguments: clonedArguments,
+    ...(annotations === undefined ? {} : { annotations }),
+    identity: prepared.result,
+  });
+  return Object.freeze({ context, dispatchParams: prepared.dispatchParams });
 }

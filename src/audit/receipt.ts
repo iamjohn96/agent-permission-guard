@@ -22,7 +22,7 @@ const TimestampSchema = z.iso.datetime({ offset: true });
 const SchemaIdentitySchema = z.object({
   name: z.literal('apg-action-receipt'),
   majorVersion: z.literal(1),
-  minorVersion: z.literal(0),
+  minorVersion: z.union([z.literal(0), z.literal(1)]),
   canonicalization: z.literal('apg-canonical-json-v1'),
 }).strict();
 
@@ -33,16 +33,109 @@ const ReceiptIdentitySchema = z.object({
   assuranceLevel: z.literal('portable_unsigned'),
 }).strict();
 
+const SafeIdentityScalarSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('string'), value: z.string().max(512) }).strict(),
+  z.object({ type: z.literal('enum'), value: IdentifierSchema }).strict(),
+  z.object({ type: z.literal('integer'), value: z.number().int().safe() }).strict(),
+  z.object({ type: z.literal('boolean'), value: z.boolean() }).strict(),
+  z.object({ type: z.literal('null') }).strict(),
+]);
+
+const SafeIdentityValueSchema = z.union([
+  SafeIdentityScalarSchema,
+  z.object({
+    type: z.literal('ordered_list'),
+    items: z.array(SafeIdentityScalarSchema).max(100),
+  }).strict(),
+]);
+
+const SafeIdentityClaimSchema = z.object({
+  name: IdentifierSchema,
+  value: SafeIdentityValueSchema,
+}).strict();
+
+const ReceiptIdentityEvidenceSchema = z.object({
+  profileStatus: z.enum(['projected', 'rejected']),
+  profileId: IdentifierSchema,
+  profileVersion: z.number().int().min(1).max(1_000_000),
+  profileManifestDigest: DigestSchema,
+  serverProvenanceAssurance: z.literal('configured_label_only'),
+  parameterCoverage: z.enum(['none', 'declared_subset', 'complete_action_parameters']),
+  safeClaims: z.array(SafeIdentityClaimSchema).max(64),
+  omittedCategories: z.array(IdentifierSchema).max(32),
+  observedSchemaDigest: DigestSchema.optional(),
+  failureCode: ReasonCodeSchema.optional(),
+}).strict().superRefine((evidence, context) => {
+  const claimNames = evidence.safeClaims.map((claim) => claim.name);
+  if (new Set(claimNames).size !== claimNames.length || claimNames.join('\0') !== [...claimNames].sort().join('\0')) {
+    context.addIssue({ code: 'custom', message: 'Identity claims must be unique and sorted' });
+  }
+  const omitted = evidence.omittedCategories;
+  if (new Set(omitted).size !== omitted.length || omitted.join('\0') !== [...omitted].sort().join('\0')) {
+    context.addIssue({ code: 'custom', message: 'Omitted identity categories must be unique and sorted' });
+  }
+  if (evidence.profileStatus === 'projected' && evidence.failureCode !== undefined) {
+    context.addIssue({ code: 'custom', message: 'Projected identity evidence cannot contain a failure code' });
+  }
+  if (
+    evidence.profileStatus === 'projected'
+    && (
+      evidence.parameterCoverage === 'none'
+      || (evidence.parameterCoverage === 'complete_action_parameters' && evidence.omittedCategories.length !== 0)
+      || (evidence.parameterCoverage === 'declared_subset' && evidence.omittedCategories.length === 0)
+    )
+  ) {
+    context.addIssue({ code: 'custom', message: 'Projected identity coverage is inconsistent' });
+  }
+  if (
+    evidence.profileStatus === 'rejected'
+    && (
+      evidence.failureCode === undefined
+      || evidence.parameterCoverage !== 'none'
+      || evidence.safeClaims.length !== 0
+      || evidence.omittedCategories.length === 0
+    )
+  ) {
+    context.addIssue({ code: 'custom', message: 'Rejected identity evidence is inconsistent' });
+  }
+});
+
 const ActionSchema = z.object({
   id: z.uuid(),
   adapter: IdentifierSchema,
   adapterVersion: IdentifierSchema,
   operation: IdentifierSchema,
-  identityAssurance: z.enum(['structural_only', 'adapter_scoped', 'execution_plan_exact']),
+  identityAssurance: z.enum(['structural_only', 'adapter_scoped', 'adapter_action_exact', 'execution_plan_exact']),
   intentDigest: DigestSchema,
   subject: z.string().min(1).max(512).optional(),
   executionPlanHash: HashSchema.optional(),
-}).strict();
+  identityEvidence: ReceiptIdentityEvidenceSchema.optional(),
+}).strict().superRefine((action, context) => {
+  const evidence = action.identityEvidence;
+  if (action.identityAssurance === 'adapter_action_exact') {
+    if (
+      evidence === undefined
+      || evidence.profileStatus !== 'projected'
+      || evidence.parameterCoverage !== 'complete_action_parameters'
+      || evidence.omittedCategories.length !== 0
+    ) {
+      context.addIssue({ code: 'custom', message: 'Exact adapter identity lacks complete profile evidence' });
+    }
+  }
+  if (evidence === undefined) return;
+  if (action.identityAssurance === 'structural_only' && evidence.profileStatus !== 'rejected') {
+    context.addIssue({ code: 'custom', message: 'Structural identity can contain only rejected profile evidence' });
+  }
+  if (
+    action.identityAssurance === 'adapter_scoped'
+    && (evidence.profileStatus !== 'projected' || evidence.parameterCoverage !== 'declared_subset')
+  ) {
+    context.addIssue({ code: 'custom', message: 'Adapter-scoped identity lacks partial profile evidence' });
+  }
+  if (action.identityAssurance === 'execution_plan_exact') {
+    context.addIssue({ code: 'custom', message: 'Execution-plan identity cannot contain MCP profile evidence' });
+  }
+});
 
 const CoverageSchema = z.object({
   routedThroughApg: z.literal(true),
@@ -178,6 +271,7 @@ export const AuthorizationReceiptSchema = z.object({
   issuer: IssuerSchema,
   limitations: LimitationsSchema,
 }).strict().superRefine((receipt, context) => {
+  validateReceiptIdentityVersion(receipt.schema, receipt.action, context);
   if (
     receipt.authorization.status === 'authorized'
     && (
@@ -219,11 +313,38 @@ export const OutcomeReceiptSchema = z.object({
   recovery: RecoverySchema,
   issuer: IssuerSchema,
   limitations: LimitationsSchema,
-}).strict();
+}).strict().superRefine((receipt, context) => {
+  validateReceiptIdentityVersion(receipt.schema, receipt.action, context);
+});
 
 export type AuthorizationReceipt = z.infer<typeof AuthorizationReceiptSchema>;
 export type OutcomeReceipt = z.infer<typeof OutcomeReceiptSchema>;
 export type ObservedReceiptResult = z.infer<typeof ObservedResultSchema>;
+export type ReceiptSafeIdentityScalar =
+  | Readonly<{ type: 'string'; value: string }>
+  | Readonly<{ type: 'enum'; value: string }>
+  | Readonly<{ type: 'integer'; value: number }>
+  | Readonly<{ type: 'boolean'; value: boolean }>
+  | Readonly<{ type: 'null' }>;
+export type ReceiptSafeIdentityValue = ReceiptSafeIdentityScalar | Readonly<{
+  type: 'ordered_list';
+  items: readonly ReceiptSafeIdentityScalar[];
+}>;
+export type ReceiptIdentityEvidence = Readonly<{
+  profileStatus: 'projected' | 'rejected';
+  profileId: string;
+  profileVersion: number;
+  profileManifestDigest: string;
+  serverProvenanceAssurance: 'configured_label_only';
+  parameterCoverage: 'none' | 'declared_subset' | 'complete_action_parameters';
+  safeClaims: readonly Readonly<{
+    name: string;
+    value: ReceiptSafeIdentityValue;
+  }>[];
+  omittedCategories: readonly string[];
+  observedSchemaDigest?: string;
+  failureCode?: string;
+}>;
 
 export type ReceiptPolicyIdentity = Readonly<{
   schemaVersion: number;
@@ -239,6 +360,7 @@ export type ReceiptContext = Readonly<{
   boundary: z.infer<typeof CoverageSchema>['boundary'];
   identityAssurance: z.infer<typeof ActionSchema>['identityAssurance'];
   identityMaterial: unknown;
+  identityEvidence?: ReceiptIdentityEvidence;
   subject?: string;
   executionPlanHash?: string;
   policy: ReceiptPolicyIdentity;
@@ -271,7 +393,7 @@ export function createAuthorizationReceipt(input: Readonly<{
 }>): AuthorizationReceipt {
   const action = actionFor(input.actionId, input.context);
   return AuthorizationReceiptSchema.parse({
-    schema: schemaIdentity(),
+    schema: schemaIdentity(input.context),
     receipt: {
       id: input.receiptId ?? randomUUID(),
       type: 'authorization',
@@ -309,7 +431,7 @@ export function createOutcomeReceipt(input: Readonly<{
   observedResult?: ObservedReceiptResult;
 }>): OutcomeReceipt {
   return OutcomeReceiptSchema.parse({
-    schema: schemaIdentity(),
+    schema: input.authorization.schema,
     receipt: {
       id: input.receiptId ?? randomUUID(),
       type: 'outcome',
@@ -356,16 +478,33 @@ function actionFor(actionId: string, context: ReceiptContext): z.infer<typeof Ac
     })).digest('hex')}`,
     ...(context.subject === undefined ? {} : { subject: context.subject }),
     ...(context.executionPlanHash === undefined ? {} : { executionPlanHash: context.executionPlanHash }),
+    ...(context.identityEvidence === undefined ? {} : { identityEvidence: context.identityEvidence }),
   });
 }
 
-function schemaIdentity(): z.infer<typeof SchemaIdentitySchema> {
+function schemaIdentity(context: ReceiptContext): z.infer<typeof SchemaIdentitySchema> {
   return {
     name: 'apg-action-receipt',
     majorVersion: 1,
-    minorVersion: 0,
+    minorVersion: context.identityEvidence === undefined ? 0 : 1,
     canonicalization: 'apg-canonical-json-v1',
   };
+}
+
+function validateReceiptIdentityVersion(
+  schema: z.infer<typeof SchemaIdentitySchema>,
+  action: z.infer<typeof ActionSchema>,
+  context: z.RefinementCtx,
+): void {
+  if (schema.minorVersion === 0 && action.identityEvidence !== undefined) {
+    context.addIssue({ code: 'custom', message: 'Receipt schema 1.0 cannot contain identity profile evidence' });
+  }
+  if (schema.minorVersion === 1 && action.identityEvidence === undefined) {
+    context.addIssue({ code: 'custom', message: 'Receipt schema 1.1 requires identity profile evidence' });
+  }
+  if (schema.minorVersion === 0 && action.identityAssurance === 'adapter_action_exact') {
+    context.addIssue({ code: 'custom', message: 'Receipt schema 1.0 cannot claim exact adapter identity' });
+  }
 }
 
 function issuer(): z.infer<typeof IssuerSchema> {
