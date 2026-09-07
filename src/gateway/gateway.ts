@@ -16,6 +16,7 @@ import type { ApprovalCoordinator, ApprovalOutcome } from '../approval/types.js'
 import type { GatewayServer } from './types.js';
 import { connectStdioUpstream } from '../transport/stdio-upstream.js';
 import type { StdioUpstreamConfig } from '../transport/types.js';
+import { APG_VERSION } from '../version.js';
 
 export async function createGateway(
   upstreamConfig: StdioUpstreamConfig,
@@ -30,7 +31,7 @@ export async function createGateway(
   const serverFactory: McpServerFactory = () => {
     const activeCalls = new Map<RequestId, AbortController>();
     const server = new Server(
-      { name: 'agent-permission-guard', version: '0.1.0' },
+      { name: 'agent-permission-guard', version: APG_VERSION },
       { capabilities: { tools: {} } },
     );
 
@@ -103,14 +104,24 @@ export async function createGateway(
         // cannot be written, the upstream tool is never invoked.
         auditCall.markForwarding();
 
+        let result: CallToolResult;
         try {
-          const result = await upstream.client.callTool(request.params, {
+          result = await upstream.client.callTool(request.params, {
             signal: callAbort.signal,
           });
+        } catch (error) {
+          auditCall.markFailed(callAbort.signal.aborted ? 'cancelled' : 'upstream_error');
+          throw error;
+        }
+        try {
           auditCall.markCompleted(result);
           return projectResult(server, result, tool);
         } catch (error) {
-          auditCall.markFailed(callAbort.signal.aborted ? 'cancelled' : 'upstream_error');
+          try {
+            auditCall.markFailed('audit_completion_failed');
+          } catch {
+            // The upstream action may already have produced effects; never retry it.
+          }
           throw error;
         }
       } finally {

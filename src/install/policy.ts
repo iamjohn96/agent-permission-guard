@@ -6,26 +6,33 @@ import type {
   InstallRiskSignalCode,
 } from './types.js';
 
-const DENY_SIGNALS = new Set<InstallRiskSignalCode>([
-  'exact_version_unresolved',
-  'critical_advisory',
-]);
+export const INSTALL_POLICY_MODEL = Object.freeze({
+  id: 'install_guard_builtin_v0',
+  denySignals: Object.freeze<readonly InstallRiskSignalCode[]>([
+    'exact_version_unresolved',
+    'critical_advisory',
+  ]),
+  askSignals: Object.freeze<readonly InstallRiskSignalCode[]>([
+    'metadata_unavailable',
+    'metadata_contradictory',
+    'lifecycle_scripts',
+    'high_advisory',
+    'possible_typosquat',
+    'mutable_source',
+    'limited_registry_evidence',
+  ]),
+  riskEscalationThreshold: 50,
+  localExecutionRequiresApproval: true,
+});
 
-const ASK_SIGNALS = new Set<InstallRiskSignalCode>([
-  'metadata_unavailable',
-  'metadata_contradictory',
-  'lifecycle_scripts',
-  'high_advisory',
-  'possible_typosquat',
-  'mutable_source',
-  'limited_registry_evidence',
-]);
+const DENY_SIGNALS = new Set<InstallRiskSignalCode>(INSTALL_POLICY_MODEL.denySignals);
+const ASK_SIGNALS = new Set<InstallRiskSignalCode>(INSTALL_POLICY_MODEL.askSignals);
 
 export function evaluateInstallPolicy(resolution: InstallResolution): InstallPolicyEvaluation {
   const risk = scoreInstallRisk(resolution);
   const codes = risk.signals.map((signal) => signal.code);
   const signalDecision = strictestSignalDecision(codes);
-  const shouldEscalate = signalDecision === 'allow' && risk.score >= 50;
+  const shouldEscalate = signalDecision === 'allow' && risk.score >= INSTALL_POLICY_MODEL.riskEscalationThreshold;
   const effectiveDecision = shouldEscalate ? 'ask' : signalDecision;
 
   return {

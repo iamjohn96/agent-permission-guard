@@ -1,5 +1,8 @@
 import type { ApprovalOutcome, ApprovalRequestView } from '../approval/types.js';
 import type { AuditCall, AuditRecorder } from '../audit/recorder.js';
+import type { ReceiptContext } from '../audit/receipt.js';
+import { staticPolicyIdentity } from '../policy/identity.js';
+import { INSTALL_POLICY_MODEL } from './policy.js';
 import type {
   InstallExecutionPlan,
   InstallExecutionResult,
@@ -33,10 +36,49 @@ export class InstallAuditAdapter {
         reasonCodes: evaluation.reasonCodes,
         risk: evaluation.risk,
       },
+      receipt: installReceiptContext(request),
     });
 
     return adaptCall(call);
   }
+}
+
+const INSTALL_POLICY_IDENTITY = staticPolicyIdentity(
+  1,
+  'install_guard_builtin',
+  '1',
+  INSTALL_POLICY_MODEL,
+);
+
+function installReceiptContext(request: InstallRequest | InstallExecutionPlan): ReceiptContext {
+  if ('planHash' in request) {
+    return {
+      adapter: 'install_guard',
+      adapterVersion: '1',
+      operation: `${request.runner}_install`,
+      boundary: 'install_guard_plan',
+      identityAssurance: 'execution_plan_exact',
+      identityMaterial: { planHash: request.planHash },
+      subject: `${request.packageName}@${request.resolvedVersion}`,
+      executionPlanHash: request.planHash,
+      policy: INSTALL_POLICY_IDENTITY,
+    };
+  }
+  return {
+    adapter: 'install_guard',
+    adapterVersion: '1',
+    operation: `${request.runner}_install`,
+    boundary: 'install_guard_plan',
+    identityAssurance: 'adapter_scoped',
+    identityMaterial: {
+      runner: request.runner,
+      packageName: request.packageName,
+      requestedSpecifier: request.requestedSpecifier,
+      options: [...request.options],
+    },
+    subject: `${request.packageName}@${request.requestedSpecifier}`,
+    policy: INSTALL_POLICY_IDENTITY,
+  };
 }
 
 export function approvalArguments(

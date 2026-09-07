@@ -1,6 +1,6 @@
 import type { ApprovalCoordinator, ApprovalOutcome, ApprovalTicket } from '../approval/types.js';
 import { approvalArguments, type InstallAuditAdapter } from './audit.js';
-import { evaluateInstallPolicy } from './policy.js';
+import { evaluateInstallPolicy, INSTALL_POLICY_MODEL } from './policy.js';
 import type {
   InstallGuardResult,
   InstallExecutionResult,
@@ -132,6 +132,7 @@ function executionEvaluation(
       reasonCodes: Object.freeze([...evaluation.reasonCodes, 'execution_requires_resolved_metadata']),
     };
   }
+  if (!INSTALL_POLICY_MODEL.localExecutionRequiresApproval) return evaluation;
   return {
     ...evaluation,
     effectiveDecision: 'ask',

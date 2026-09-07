@@ -2,9 +2,11 @@
 
 ## Current Milestone
 
-macOS M0 — Local API Contract Hardening: complete locally.
+ER1 — Portable Unsigned Evidence: implemented locally; awaiting review and commit approval.
 
-The local dashboard state and authenticated health API now share a random non-secret `instance_id`. This lets a future native companion reject stale state, PID reuse, and responses from an older connection generation without changing API version 1.
+APG now finalizes a versioned Authorization Receipt before dispatch and a linked Outcome Receipt after
+bounded observation. Explicit export and offline verification preserve honest `portable_unsigned`
+assurance without claiming issuer authentication, runtime attestation, or protection outside an adapter.
 
 ## Completed
 
@@ -33,15 +35,41 @@ The local dashboard state and authenticated health API now share a random non-se
   - state cleanup identity includes URL, PID, start time, and instance ID
   - native rotation, token lifetime, SQLite, redirect, and fail-closed contracts documented
   - stale-token and same-PID replacement integration coverage
+- ER0:
+  - product boundary and assurance-level vocabulary
+  - separate Authorization and Outcome Receipt semantics
+  - exact policy-content digest distinct from policy schema version
+  - actor/approver assurance without unsupported human-identity claims
+  - privacy-safe redaction-before-digest and direct-bypass disclosure
+  - durable pre-dispatch evidence and incomplete post-audit failure semantics
+  - deferred signing-provider and external-anchor boundaries
+  - risk register, mitigations, release-blocking controls, ER1 scope, and security test strategy
+- ER1 local implementation:
+  - strict version-1 Authorization and Outcome Receipt schemas
+  - exact validated YAML policy digest and centralized Install Guard built-in policy digest
+  - durable authorization-before-dispatch and approval state-machine guards
+  - exact Install Guard plan identity; explicit structural-only generic MCP identity
+  - allowlisted bounded result projection without raw arguments or stdout/stderr
+  - deterministic canonical export with golden fixtures and strict resource limits
+  - offline digest, action-link, completeness, and local event-proof verification
+  - read-only audit database export and exclusive private output-file creation
+  - legacy-incomplete and started-without-terminal incomplete projection
+  - explicit post-dispatch `audit_failed` incomplete semantics without action retry
+  - Dashboard Action ID visibility and receipt usage documentation
 
 ## In Progress
 
-- No active M0 implementation work remains.
+- ER1 source, tests, CLI, Dashboard Action ID display, and documentation are complete locally and await
+  review. No signing key, database migration, dependency, external anchor, or external service was added.
 
 ## Remaining
 
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
-- Start M1 native technical preview in the separate macOS repository only after a new Architecture Check and approval.
+- Commit and push ER1 after review and explicit approval.
+- Design adapter-specific safe identity projections for exact MCP parameter binding before signing weak
+  structural-only evidence.
+- Select signing and trust architecture only after receipt semantics, verifier behavior, and identity
+  assurance are accepted.
 
 ## Important Architecture
 
@@ -52,6 +80,10 @@ The local dashboard state and authenticated health API now share a random non-se
 - ContextGate is outside this repository and roadmap.
 - The future macOS app is a client of the local API; the CLI remains the enforcement boundary.
 - State `instance_id` and authenticated health matching establish freshness. PID and start time are diagnostic only.
+- A receipt must distinguish Authorization evidence from observed Outcome evidence and declare its exact
+  assurance level, APG adapter coverage, and unobserved effects.
+- The current hash chain is local integrity evidence, not independent cryptographic proof against a
+  database owner who can recompute it.
 
 ## Important Decisions
 
@@ -61,6 +93,14 @@ The local dashboard state and authenticated health API now share a random non-se
 - Project `.npmrc` files are rejected by presence only; their contents are not read.
 - The current milestone does not claim OS sandboxing, complete child-effect observation, or automatic rollback.
 - State version and API version remain 1 because `instance_id` is an additive field; new native clients must require it.
+- Reserve `Cryptographic Execution Receipt` for a future signed or anchored assurance level. ER1 should
+  use portable unsigned evidence with precise local-verification wording.
+- Receipt export opens the audit database read-only, refuses invalid chains and output-file overwrite,
+  and performs no network request.
+- SQLite can create or retain normal WAL/SHM coordination sidecars for a read-only connection; export
+  does not write audit rows, run migrations, or modify the main database bytes.
+- Missing terminal evidence remains incomplete. Automatic recovery mutation is deferred until an
+  exclusive-writer/session-ownership mechanism exists.
 
 ## Known Issues
 
@@ -72,10 +112,18 @@ The local dashboard state and authenticated health API now share a random non-se
 - npm performs dependency metadata and tarball requests itself after approval; APG does not act as an HTTP proxy for each transitive request.
 - npm public version is `0.2.0`, including IG2 and IG3.
 - M0 does not provide OS-level process attestation. A malicious process running as the same user may read the private state file and bearer token.
+- New ER1 audit records bind the exact validated policy-content digest. Historical records remain
+  `legacy_incomplete`; receipts do not authenticate an APG build or verified human identity.
+- Generic MCP portable identity is currently `structural_only`; arbitrary parameter values are omitted
+  to avoid secret leakage. Install Guard receipts retain exact execution-plan identity.
+- The local SHA-256 event chain can be recomputed by an actor with full database write access; stronger
+  issuer and history guarantees require a separately approved signing and anchoring architecture.
 
 ## Tests
 
-- Current full local suite: 128 passed, 2 skipped on 2026-09-02.
+- Current full local suite: 140 passed, 2 skipped on 2026-09-07.
+- ER1 focused suite: 63 passed across receipts, audit state transitions, Install Guard integration,
+  policy identity, and Dashboard state.
 - IG3 coverage includes execution plan, plan tamper, parser bypass, fake executable process execution, registry adapter, dashboard approval, timeout, cancellation, output redaction, terminal audit failure, and exact integrity verification.
 - Manual npm acceptance: `yaml@2.9.0`, `--ignore-scripts --save-exact`, exit code 0, verification `verified`, matching approved SHA-512 integrity, valid nine-event audit hash chain. The same temporary audit database also contains the earlier approval-expired attempt.
 - Release package dry-run: `agent-permission-guard@0.2.0`, 56 files, 61,727 bytes compressed, scripts disabled, and no registry access. Public registry verification confirmed version `0.2.0` after publish.
@@ -99,4 +147,8 @@ The local dashboard state and authenticated health API now share a random non-se
 
 ## Next Recommended Task
 
-Start a fresh Work for M1 native technical preview in a separate macOS repository. Real npx acceptance remains a later independent approval because it executes downloaded package code directly.
+Review the ER1 diff, run final local verification, then commit and push only after explicit approval.
+After ER1 lands, prepare an Architecture Check for adapter-specific safe MCP identity projections; do not
+add signing until exact-versus-structural identity semantics are accepted. Signing keys, database
+migrations, dependencies, external anchors, and public cryptographic-attestation claims remain separate
+approval boundaries.

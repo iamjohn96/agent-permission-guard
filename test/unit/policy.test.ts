@@ -177,13 +177,26 @@ describe('live policy controller', () => {
     try {
       const controller = new LivePolicyController(path);
       const original = controller.getView();
-      expect((await controller.evaluate({ serverId: 'repo', toolName: 'read_file', arguments: {} })).action).toBe('forward');
+      const initialDecision = await controller.evaluate({ serverId: 'repo', toolName: 'read_file', arguments: {} });
+      expect(initialDecision.action).toBe('forward');
+      expect(initialDecision.receipt).toMatchObject({
+        adapter: 'mcp_proxy',
+        boundary: 'mcp_proxy_call',
+        identityAssurance: 'structural_only',
+        policy: {
+          schemaVersion: 1,
+          evaluatorName: 'apg_mcp_policy',
+        },
+      });
+      expect(initialDecision.receipt?.policy.contentDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
 
       const next = 'version: 1\ndefaults:\n  approval_ttl_seconds: 5\n  tool_timeout_seconds: 60\nrules:\n  - id: deny-read\n    match: { server: repo, tools: [read_file] }\n    decision: deny\n';
       const updated = controller.update(next, original.revision);
       expect(updated.source).toBe(next);
       expect(controller.getApprovalTtlMs()).toBe(5_000);
-      expect((await controller.evaluate({ serverId: 'repo', toolName: 'read_file', arguments: {} })).action).toBe('deny');
+      const updatedDecision = await controller.evaluate({ serverId: 'repo', toolName: 'read_file', arguments: {} });
+      expect(updatedDecision.action).toBe('deny');
+      expect(updatedDecision.receipt?.policy.contentDigest).not.toBe(initialDecision.receipt?.policy.contentDigest);
       expect(statSync(path).mode & 0o777).toBe(0o600);
       expect(readdirSync(directory)).toEqual(['policy.yaml']);
 

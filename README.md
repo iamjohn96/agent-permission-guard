@@ -5,7 +5,7 @@ Firewall and audit layer for AI agents.
 Agent Permission Guard is an MCP gateway that sits between an MCP client and server. The current implementation is a local CLI enforcement point with deterministic policy evaluation, risk scoring, and a local SQLite audit trail.
 
 > [!WARNING]
-> Agent Permission Guard `0.1.x` is a developer alpha. Test policies with non-production tools and data before placing it in front of credentials, destructive actions, or irreversible external side effects.
+> Agent Permission Guard `0.2.x` is a developer preview. Test policies with non-production tools and data before placing it in front of credentials, destructive actions, or irreversible external side effects.
 
 ## Install
 
@@ -36,6 +36,16 @@ node dist/src/cli/main.js install npm yaml@2.9.0 --ignore-scripts --save-exact
 ```
 
 This command performs real package download and local project changes only after one-time approval in the printed localhost dashboard. Use it only in a disposable project. Direct `npm` and `npx` commands bypass APG entirely.
+
+Export and verify portable unsigned evidence for an action shown in Dashboard Audit history:
+
+```sh
+apg receipt export <action-id> --audit-db ./.apg/audit.sqlite --output ./action.apg-receipt.json
+apg receipt verify ./action.apg-receipt.json
+```
+
+This export is deterministic and network-free, but it does not authenticate an issuer. See the
+[portable receipt guide](./docs/receipts.md) for verification semantics and limitations.
 
 ## Install from source
 
@@ -94,6 +104,8 @@ APG prints a tokenized localhost dashboard URL to stderr. With the optional `--d
 - Validate, atomically save, and immediately activate YAML policy changes from the dashboard.
 - Detect stale editor revisions or external file changes instead of overwriting them.
 - Record dashboard policy-change attempts in the same audit trail.
+- Finalize a portable unsigned Authorization Receipt before dispatch and a linked Outcome Receipt after bounded observation.
+- Export receipts explicitly and verify their canonical encoding, digests, links, completeness, and local event proofs offline.
 
 See [`apg.example.yaml`](./apg.example.yaml) for the current policy format.
 
@@ -126,6 +138,8 @@ apg init
 apg doctor [--dashboard-state ./.apg/dashboard.json] -- <upstream-command>
 apg inspect <npm|npx> <package-spec> [--registry <https-url>]
 apg install <npm|npx> <package-spec> [supported package options] [--registry <https-url>] [--timeout-seconds <1..900>] [--approval-ttl-seconds <1..3600>]
+apg receipt export <action-id> [--audit-db <audit.sqlite>] --output <receipt.json>
+apg receipt verify <receipt.json>
 apg proxy --policy ./.apg/policy.yaml --audit-db ./.apg/audit.sqlite [--dashboard-state ./.apg/dashboard.json] -- <upstream-command> [args...]
 ```
 
@@ -175,10 +189,11 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting changes. Report suspe
 
 ## Current limitations
 
-- Audit history currently shows the 50 most recent calls and does not yet provide search, pagination, retention controls, or export.
+- Audit history currently shows the 50 most recent calls and does not yet provide search, pagination, or retention controls. Receipt export is explicit and action-by-action.
 - External edits to the active policy are not hot-reloaded. APG refuses to overwrite them; restart the process after reviewing an external change.
 - The approval token is process-local and the server only binds to `127.0.0.1`, but a fully packaged desktop product should additionally use OS-level process identity and secure local credential storage.
 - The hash chain detects event-content changes, reordering, and interior deletion. It is not yet externally anchored or signed, so tail truncation or full database replacement requires a future external checkpoint to detect.
+- Portable receipts are unsigned and do not authenticate APG, a human approver, or a particular runtime. They expose their `PORTABLE_UNSIGNED` assurance level and cannot upgrade legacy evidence after the fact.
 - If a tool executes successfully and the post-execution outcome write then fails, the gateway cannot undo that external side effect. The durable pre-execution event still records that execution was released.
 - Node.js 24 LTS is the target runtime; development may also work on newer supported Node versions listed in `package.json`.
 - APG currently forwards only `PATH` to upstream processes. MCP servers that require environment credentials are not yet supported by the documented Codex setup.

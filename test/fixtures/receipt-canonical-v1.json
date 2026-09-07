@@ -1,0 +1,17 @@
+[
+  {
+    "name": "key-order",
+    "value": { "z": 1, "a": ["x", { "b": true, "a": null }] },
+    "canonical": "{\"a\":[\"x\",{\"a\":null,\"b\":true}],\"z\":1}"
+  },
+  {
+    "name": "unicode",
+    "value": { "한글": "값", "emoji": "😀" },
+    "canonical": "{\"emoji\":\"😀\",\"한글\":\"값\"}"
+  },
+  {
+    "name": "number-boundaries",
+    "value": { "large": 1e21, "small": 1e-7, "zero": 0 },
+    "canonical": "{\"large\":1e+21,\"small\":1e-7,\"zero\":0}"
+  }
+]

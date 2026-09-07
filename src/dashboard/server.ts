@@ -8,6 +8,7 @@ import type { ApprovalCoordinator } from '../approval/types.js';
 import type { AuditQueryService } from '../audit/query-service.js';
 import type { SqliteAuditRecorder } from '../audit/recorder.js';
 import { PolicyLoadError } from '../policy/loader.js';
+import { staticPolicyIdentity } from '../policy/identity.js';
 import { LivePolicyController, PolicyConflictError } from '../policy/live-controller.js';
 
 export type DashboardHandle = Readonly<{
@@ -134,6 +135,21 @@ async function handleRequest(
               { code: 'privileged_target', points: 25, source: 'policy_tag' },
             ],
           },
+        },
+        receipt: {
+          adapter: 'apg_dashboard',
+          adapterVersion: '1',
+          operation: 'update_policy',
+          boundary: 'apg_local_control',
+          identityAssurance: 'adapter_scoped',
+          identityMaterial: {
+            expectedRevision: body.revision,
+            proposedRevision: createHash('sha256').update(body.source).digest('hex'),
+          },
+          policy: staticPolicyIdentity(1, 'authenticated_dashboard_control', '1', {
+            authentication: 'local_bearer_capability',
+            operation: 'update_policy',
+          }),
         },
       });
       auditCall.markForwarding();

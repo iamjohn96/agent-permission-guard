@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { LocalApprovalService } from '../../src/approval/service.js';
 import { AuditQueryService } from '../../src/audit/query-service.js';
+import { PortableReceiptService } from '../../src/audit/portable-receipt.js';
 import { SqliteAuditRecorder } from '../../src/audit/recorder.js';
 import type { AuditCall, AuditRecorder } from '../../src/audit/recorder.js';
 import { openAuditDatabase } from '../../src/db/database.js';
@@ -169,7 +170,8 @@ describe('Install Guard approval and audit integration', () => {
 
       expect(result.status).toBe('completed');
       expect(fixture.runner.plans).toHaveLength(1);
-      expect(fixture.auditQuery.listRecent(10)).toMatchObject({
+      const audit = fixture.auditQuery.listRecent(10);
+      expect(audit).toMatchObject({
         hashChainValid: true,
         calls: [{
           serverId: 'install-guard',
@@ -177,6 +179,21 @@ describe('Install Guard approval and audit integration', () => {
           effectiveDecision: 'ask',
           status: 'completed',
         }],
+      });
+      const action = audit.calls[0];
+      if (action === undefined) throw new Error('Expected one install audit action');
+      expect(fixture.exportReceipt(action.id)).toMatchObject({
+        completeness: 'complete',
+        authorization: {
+          receipt: {
+            action: {
+              identityAssurance: 'execution_plan_exact',
+              executionPlanHash: 'a'.repeat(64),
+              subject: 'yaml@2.9.0',
+            },
+            policy: { evaluatorName: 'install_guard_builtin' },
+          },
+        },
       });
     } finally {
       fixture.close();
@@ -568,6 +585,7 @@ function createServiceFixture(
   runner: FakeInstallRunner;
   approvals: LocalApprovalService;
   auditQuery: AuditQueryService;
+  exportReceipt(actionId: string): ReturnType<PortableReceiptService['exportAction']>;
   close(): void;
 }> {
   const request = requestedInput ?? parseInstallRequest('npm', ['yaml@2.9.0'], workingDirectory);
@@ -594,6 +612,7 @@ function createServiceFixture(
     runner,
     approvals,
     auditQuery,
+    exportReceipt: (actionId) => new PortableReceiptService(database, recorder).exportAction(actionId),
     close: () => {
       approvals.close();
       database.close();

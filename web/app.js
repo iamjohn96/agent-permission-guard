@@ -75,7 +75,13 @@ function renderAudit(calls, hashChainValid) {
     title.append(element('p', 'server', `${call.serverId} · ${new Date(call.startedAt).toLocaleString()}`), element('h3', '', call.toolName));
     row.append(title, element('span', `decision decision-${call.effectiveDecision}`, call.effectiveDecision));
     const facts = element('div', 'audit-facts');
-    facts.append(fact('Status', call.status), fact('Risk', `${call.riskScore} · ${call.riskBand}`), fact('Rule', call.matchedRuleId || 'Default'), fact('Latency', call.latencyMs === undefined ? '—' : `${call.latencyMs} ms`));
+    facts.append(
+      fact('Status', call.status),
+      fact('Risk', `${call.riskScore} · ${call.riskBand}`),
+      fact('Rule', call.matchedRuleId || 'Default'),
+      fact('Latency', call.latencyMs === undefined ? '—' : `${call.latencyMs} ms`),
+      fact('Action ID', call.id),
+    );
     const details = document.createElement('details');
     details.append(element('summary', '', 'View redacted details'));
     const pre = element('pre');

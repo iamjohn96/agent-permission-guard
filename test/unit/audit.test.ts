@@ -83,4 +83,25 @@ describe('SQLite audit recorder', () => {
     expect(recorder.verifyHashChain()).toBe(true);
     database.close();
   });
+
+  it('refuses missing approval, duplicate dispatch, and pre-execution blocking after dispatch', () => {
+    const database = openAuditDatabase(':memory:');
+    const recorder = new SqliteAuditRecorder(database);
+    const pending = recorder.begin(
+      { serverId: 'fixture', toolName: 'write_file', arguments: {} },
+      { action: 'ask', reason: 'approval required' },
+    );
+    expect(() => pending.markForwarding()).toThrow(/approval is not approved/);
+
+    const allowed = recorder.begin(
+      { serverId: 'fixture', toolName: 'read_file', arguments: {} },
+      { action: 'forward' },
+    );
+    allowed.markForwarding();
+    expect(() => allowed.markForwarding()).toThrow(/already recorded/);
+    expect(() => allowed.markBlocked('denied')).toThrow(/cannot be marked/);
+    allowed.markCompleted({ content: [] });
+    expect(recorder.verifyHashChain()).toBe(true);
+    database.close();
+  });
 });

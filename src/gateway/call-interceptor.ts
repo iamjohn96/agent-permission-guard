@@ -1,5 +1,6 @@
 import type { CallToolRequestParams, ToolAnnotations } from '@modelcontextprotocol/server';
 
+import type { ReceiptContext } from '../audit/receipt.js';
 import type { PolicyEvaluation } from '../policy/evaluator.js';
 
 export type ToolCallContext = Readonly<{
@@ -10,9 +11,9 @@ export type ToolCallContext = Readonly<{
 }>;
 
 export type InterceptorDecision =
-  | Readonly<{ action: 'forward'; evaluation?: PolicyEvaluation }>
-  | Readonly<{ action: 'ask'; reason: string; evaluation?: PolicyEvaluation }>
-  | Readonly<{ action: 'deny'; reason: string; evaluation?: PolicyEvaluation }>;
+  | Readonly<{ action: 'forward'; evaluation?: PolicyEvaluation; receipt?: ReceiptContext }>
+  | Readonly<{ action: 'ask'; reason: string; evaluation?: PolicyEvaluation; receipt?: ReceiptContext }>
+  | Readonly<{ action: 'deny'; reason: string; evaluation?: PolicyEvaluation; receipt?: ReceiptContext }>;
 
 export interface CallInterceptor {
   evaluate(context: ToolCallContext): Promise<InterceptorDecision>;
