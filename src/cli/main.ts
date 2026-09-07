@@ -12,6 +12,7 @@ import { type DashboardStateFile, writeDashboardStateFile } from '../dashboard/s
 import { openAuditDatabase } from '../db/database.js';
 import { createGateway } from '../gateway/gateway.js';
 import { selectBuiltInMcpIdentityProfile } from '../identity/builtin-profiles.js';
+import { prepareUpstreamLaunch } from '../launch/upstream-launch.js';
 import { LivePolicyController } from '../policy/live-controller.js';
 import { serveStdioGateway } from '../transport/stdio-downstream.js';
 import { parseDoctorArguments, runDoctor } from './doctor.js';
@@ -110,21 +111,21 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const identitySelection = parsed.identityProfileId === undefined
     ? undefined
     : selectBuiltInMcpIdentityProfile(parsed.identityProfileId);
+  const preparedLaunch = await prepareUpstreamLaunch({
+    serverId: 'local-upstream',
+    command: parsed.command,
+    args: parsed.args,
+    env: createMinimalEnvironment(),
+  });
   const policies = new LivePolicyController(parsed.policyPath);
   const database = openAuditDatabase(parsed.auditDbPath);
   const audit = new SqliteAuditRecorder(database);
   const auditQuery = new AuditQueryService(database, audit);
   const approvals = new LocalApprovalService();
-  const environment = createMinimalEnvironment();
   let gateway;
   try {
     gateway = await createGateway(
-      {
-        serverId: 'local-upstream',
-        command: parsed.command,
-        args: parsed.args,
-        env: environment,
-      },
+      preparedLaunch,
       policies,
       audit,
       {
@@ -159,8 +160,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     process.stderr.write(
       `[apg] identity profile: ${identitySelection.profileId} (required for ${identitySelection.toolName})\n`,
     );
-    process.stderr.write('[apg] server provenance: configured label only; downstream results and effects are not verified\n');
   }
+  process.stderr.write('[apg] server provenance: configured label only\n');
+  process.stderr.write('[apg] upstream launch: local pre-spawn checks applied; package, publisher, dependencies, and runtime are not verified\n');
+  process.stderr.write('[apg] protection boundary: only MCP calls routed through APG are protected; direct MCP, node, npm, and npx commands are outside coverage\n');
   process.stderr.write(`[apg] approval dashboard: ${dashboard.url}\n`);
 
   let dashboardState: DashboardStateFile | undefined;

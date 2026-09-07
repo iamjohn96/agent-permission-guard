@@ -80,6 +80,13 @@ node dist/src/cli/main.js proxy \
 
 APG prints a tokenized localhost dashboard URL to stderr. With the optional `--dashboard-state` setting, it also writes the URL, process ID, and start time to a private JSON file for MCP hosts that hide stderr. The file contains a bearer token: do not share or commit it. APG removes its own state file after a normal shutdown.
 
+Before starting the upstream process, APG resolves the command once without a shell, snapshots the
+bounded local executable, freezes the exact arguments, working directory, and minimal environment, and
+revalidates the executable immediately before startup. These are local pre-spawn integrity checks, not
+package provenance: interpreters, scripts, packages, publishers, dependencies, dynamic libraries, and
+runtime behavior are not verified. Direct MCP, Node.js, npm, or npx execution that does not pass through
+APG remains outside its protection boundary.
+
 The first opt-in Exact MCP Identity profile covers only the zero-argument Filesystem tool
 `list_allowed_directories`:
 

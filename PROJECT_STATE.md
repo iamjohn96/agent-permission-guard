@@ -2,16 +2,14 @@
 
 ## Current Milestone
 
-First production Exact MCP Identity profile: pinned Filesystem runtime acceptance is complete locally.
-The network-free implementation for `list_allowed_directories` is committed and pushed at `035bef6`;
-the acceptance harness, captured runtime schema correction, and evidence documentation await checkpoint
-commit and push approval.
+Upstream Launch Integrity Foundation implementation checkpoint. The Exact Filesystem acceptance
+checkpoint is committed and pushed at `8502e64`. The approved network-free foundation is implemented
+locally and awaits checkpoint commit and main push approval.
 
-The first opt-in production profile has explicit CLI selection, startup schema preflight, target-only
-exact-required behavior, privacy-safe UX, and network-free coverage. Its dedicated opt-in acceptance
-cannot run the broader Everything/read-file checks. The first approved run failed closed before tool
-dispatch because the pinned runtime advertised draft-07 rather than the fixture's draft 2020-12 marker.
-After capturing and binding the public target schema, the final pinned acceptance passed.
+The v0 foundation keeps production receipts at `configured_label_only`, prepares and revalidates one
+immutable upstream launch snapshot, adds only synthetic trusted launch-profile machinery, and defers
+verified package staging, registry artifacts, transitive graph identity, receipt schema 1.2, and stronger
+public assurance to later Architecture Checks.
 
 ## Completed
 
@@ -77,28 +75,30 @@ After capturing and binding the public target schema, the final pinned acceptanc
   - exactly one `list_allowed_directories` call against a disposable directory
   - complete `adapter_action_exact` portable receipt, valid local audit chain, and no path persistence
   - temporary workspace and npm cache removed after every attempt
+- Exact Filesystem acceptance checkpoint committed and pushed at `8502e64`
+- Upstream Provenance v0 Architecture Check accepted on 2026-09-07
+- Network-free Upstream Launch Integrity Foundation implemented locally:
+  - deterministic shell-free absolute command resolution with empty PATH entries ignored
+  - canonical cwd and exact cloned/frozen arguments and allowlisted environment
+  - working-directory device/inode/mode binding and immediate replacement detection
+  - bounded regular executable identity and SHA-256 snapshot held only in memory
+  - immediate pre-spawn revalidation and runtime-authenticated prepared launch
+  - STDIO transport accepts the prepared launch as its only dispatch source
+  - owning-authority authentication for synthetic launch-profile results
+  - sanitized stable failures without raw path, argument, environment, or file-byte disclosure
+  - explicit configured-label-only and direct-bypass UX
 
 ## In Progress
 
-- Acceptance harness, runtime schema correction, and completion documentation await checkpoint commit and
-  main push approval.
-- `list_allowed_directories` profile behavior:
-  - explicit CLI activation; never infer a profile from tool name, schema, annotations, or command text
-  - exact zero-parameter request identity with closed arguments and schema-drift detection
-  - target-only fail-closed behavior without changing Allow/Ask/Deny or other tools
-  - configured-label-only server provenance; no official binary or publisher claim
-  - returned directory paths and dynamic MCP Roots state excluded from request identity and receipts
-  - MCP text and structured result bodies omitted from audit summaries; only bounded outcome metadata is retained
-  - unknown selectors fail before database open or upstream execution
-  - 64 KiB observed input-schema bound and sanitized mismatch failures
-  - pinned real-package schema capture and read-only call completed under separate approval
+- Review the local Upstream Launch Integrity Foundation implementation and approve its checkpoint commit
+  and main push.
 
 ## Remaining
 
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
+- Separately architecture-check a Verified MCP Package Stage before any production package provenance
+  profile or stronger receipt assurance.
 - Review every later production MCP profile separately before it can emit exact assurance.
-- Architecture-check upstream executable/package provenance before strengthening the current
-  `configured_label_only` server claim.
 - Select signing and trust architecture only after receipt semantics, verifier behavior, and identity
   assurance are accepted.
 
@@ -152,6 +152,9 @@ After capturing and binding the public target schema, the final pinned acceptanc
   profile that binds every behavior-determining field and rejects unknown fields.
 - The common registry contains only the separately reviewed Filesystem zero-parameter production profile.
   Configured server identity remains `configured_label_only`, not executable or publisher provenance.
+- Pre-spawn executable revalidation narrows but cannot eliminate the final OS-load race. It does not
+  cover interpreter-selected scripts, imported modules, dynamic libraries, child processes, packages,
+  publishers, dependency graphs, or runtime attestation.
 - The first profile identifies an exact zero-parameter adapter action, not the directories
   returned by the tool. The result can disclose private absolute paths to the MCP client/model.
 - The Filesystem server can replace allowed directories through MCP Roots. A request receipt cannot prove
@@ -161,7 +164,10 @@ After capturing and binding the public target schema, the final pinned acceptanc
 
 ## Tests
 
-- Current full network-free local suite: 161 passed, 3 skipped on 2026-09-07.
+- Current full network-free local suite: 176 passed, 3 skipped on 2026-09-07.
+- Upstream Launch Integrity focused coverage: 14 passed across deterministic resolution, empty PATH,
+  symlinks, immutable configuration, digest binding, executable drift/no-spawn, forged dispatch,
+  bounded target checks, private-value-safe failures, and synthetic profile authentication.
 - Pinned Filesystem Exact Identity acceptance: 3 passed, including controlled-environment guards, exact
   runtime schema, one target call, complete portable evidence, valid audit chain, path non-retention, and
   temporary cleanup.
@@ -198,6 +204,6 @@ After capturing and binding the public target schema, the final pinned acceptanc
 
 ## Next Recommended Task
 
-Review and approve the acceptance checkpoint commit and main push. After that, perform an upstream
-executable/package provenance Architecture Check before either strengthening `configured_label_only` or
-adding a path-bearing second production MCP profile.
+Review and approve the Upstream Launch Integrity Foundation checkpoint commit and main push. After that,
+perform a separate Verified MCP Package Stage Architecture Check before any registry access, package
+download/staging, package startup, production launch profile, or stronger provenance claim.

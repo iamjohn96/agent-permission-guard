@@ -13,24 +13,24 @@ import {
 } from './call-interceptor.js';
 import { NoopAuditRecorder, type AuditRecorder } from '../audit/recorder.js';
 import type { ApprovalCoordinator, ApprovalOutcome } from '../approval/types.js';
+import type { PreparedUpstreamLaunch } from '../launch/upstream-launch.js';
 import type { GatewayServer } from './types.js';
 import { connectStdioUpstream } from '../transport/stdio-upstream.js';
-import type { StdioUpstreamConfig } from '../transport/types.js';
 import { McpIdentityAuthority } from '../identity/mcp-identity.js';
 import { APG_VERSION } from '../version.js';
 
 export async function createGateway(
-  upstreamConfig: StdioUpstreamConfig,
+  preparedLaunch: PreparedUpstreamLaunch,
   interceptor: CallInterceptor = new ForwardAllInterceptor(),
   audit: AuditRecorder = new NoopAuditRecorder(),
   approval?: Readonly<{ coordinator: ApprovalCoordinator; getTtlMs(): number }>,
   identityAuthority: McpIdentityAuthority = new McpIdentityAuthority(),
 ): Promise<GatewayServer> {
-  const upstream = await connectStdioUpstream(upstreamConfig);
+  const upstream = await connectStdioUpstream(preparedLaunch);
   const listedTools = await (async () => {
     try {
       const result = await upstream.client.listTools();
-      identityAuthority.preflight(upstreamConfig.serverId, result.tools);
+      identityAuthority.preflight(preparedLaunch.serverId, result.tools);
       return result;
     } catch (error) {
       try {
@@ -66,7 +66,7 @@ export async function createGateway(
       try {
         const tool = toolsByName.get(request.params.name);
         const prepared = prepareToolCall(
-          upstreamConfig.serverId,
+          preparedLaunch.serverId,
           request.params,
           tool?.annotations,
           tool?.inputSchema,

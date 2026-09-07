@@ -1,8 +1,8 @@
 # Filesystem `list_allowed_directories` Exact Identity Architecture Check
 
-Status: accepted by Jonny on 2026-09-07. The network-free implementation is committed and pushed. The
-dedicated opt-in acceptance first failed closed on wire-schema drift, then passed after binding the
-captured pinned-runtime draft-07 schema. The acceptance checkpoint awaits commit and push approval.
+Status: accepted by Jonny on 2026-09-07. The network-free implementation and pinned-package acceptance
+checkpoint are committed and pushed at `8502e64`. The dedicated opt-in acceptance first failed closed on
+wire-schema drift, then passed after binding the captured pinned-runtime draft-07 schema.
 
 Date: 2026-09-07
 

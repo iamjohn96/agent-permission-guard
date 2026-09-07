@@ -152,6 +152,22 @@ describe('apg proxy arguments', () => {
     expect(() => readFileSync(auditPath)).toThrow();
     expect(() => readFileSync(markerPath)).toThrow();
   });
+
+  it('rejects an unavailable upstream before opening the audit database', async () => {
+    const directory = temporaryDirectory();
+    const policyPath = join(directory, 'policy.yaml');
+    const auditPath = join(directory, 'audit.sqlite');
+    const missingCommand = join(directory, 'private-missing-command');
+    writeFileSync(policyPath, 'version: 1\nrules: []\n', { mode: 0o600 });
+
+    await expect(main([
+      'proxy',
+      '--policy', policyPath,
+      '--audit-db', auditPath,
+      '--', missingCommand, 'private-argument',
+    ])).rejects.toThrow('executable_unavailable');
+    expect(() => readFileSync(auditPath)).toThrow();
+  });
 });
 
 describe('apg inspect', () => {

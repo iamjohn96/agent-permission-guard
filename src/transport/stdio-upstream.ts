@@ -1,7 +1,11 @@
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
-import type { StdioUpstreamConfig } from './types.js';
+import {
+  assertPreparedUpstreamLaunch,
+  revalidatePreparedUpstreamLaunch,
+  type PreparedUpstreamLaunch,
+} from '../launch/upstream-launch.js';
 
 export type ConnectedUpstream = Readonly<{
   client: Client;
@@ -9,20 +13,22 @@ export type ConnectedUpstream = Readonly<{
 }>;
 
 export async function connectStdioUpstream(
-  config: StdioUpstreamConfig,
+  prepared: PreparedUpstreamLaunch,
 ): Promise<ConnectedUpstream> {
+  assertPreparedUpstreamLaunch(prepared);
   const client = new Client(
     { name: 'agent-permission-guard', version: '0.1.0' },
     { versionNegotiation: { mode: 'auto' } },
   );
   const transport = new StdioClientTransport({
-    command: config.command,
-    args: [...config.args],
-    env: { ...config.env },
+    command: prepared.executable.resolvedPath,
+    args: [...prepared.arguments],
+    env: { ...prepared.environment },
     stderr: 'inherit',
-    ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
+    cwd: prepared.cwd,
   });
 
+  await revalidatePreparedUpstreamLaunch(prepared);
   await client.connect(transport);
 
   return {

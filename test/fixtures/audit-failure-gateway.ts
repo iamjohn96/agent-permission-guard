@@ -1,5 +1,6 @@
 import type { AuditRecorder } from '../../src/audit/recorder.js';
 import { createGateway } from '../../src/gateway/gateway.js';
+import { prepareUpstreamLaunch } from '../../src/launch/upstream-launch.js';
 import { parseProxyArguments } from '../../src/cli/main.js';
 import { serveStdioGateway } from '../../src/transport/stdio-downstream.js';
 
@@ -20,12 +21,12 @@ const audit: AuditRecorder = {
 
 const parsed = parseProxyArguments(process.argv.slice(2));
 const gateway = await createGateway(
-  {
+  await prepareUpstreamLaunch({
     serverId: 'fixture-upstream',
     command: parsed.command,
     args: parsed.args,
     env: process.env.PATH === undefined ? {} : { PATH: process.env.PATH },
-  },
+  }),
   undefined,
   audit,
 );
