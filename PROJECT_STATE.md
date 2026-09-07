@@ -2,13 +2,13 @@
 
 ## Current Milestone
 
-First production Exact MCP Identity profile: accepted network-free implementation for
-`list_allowed_directories` is complete locally; awaiting review and commit approval.
+First production Exact MCP Identity profile: network-free implementation for
+`list_allowed_directories` is committed and pushed at `035bef6`.
 
-The shared Exact MCP Identity foundation is committed and pushed at `f9da468`. The first opt-in production
-profile now has explicit CLI selection, startup schema preflight, target-only exact-required behavior,
-privacy-safe UX, and network-free coverage. Package execution, registry access, and real Filesystem MCP
-acceptance have not occurred.
+The first opt-in production profile has explicit CLI selection, startup schema preflight, target-only
+exact-required behavior, privacy-safe UX, and network-free coverage. The remaining task in this milestone
+is the separately approved pinned-package acceptance. Package execution, registry access, and real
+Filesystem MCP acceptance have not occurred.
 
 ## Completed
 
@@ -68,7 +68,8 @@ acceptance have not occurred.
 
 ## In Progress
 
-- Accepted `list_allowed_directories` profile implementation:
+- Pinned `@modelcontextprotocol/server-filesystem@2026.7.10` real acceptance awaiting separate approval.
+- Committed `list_allowed_directories` profile behavior:
   - explicit CLI activation; never infer a profile from tool name, schema, annotations, or command text
   - exact zero-parameter request identity with closed arguments and schema-drift detection
   - target-only fail-closed behavior without changing Allow/Ask/Deny or other tools
@@ -83,7 +84,6 @@ acceptance have not occurred.
 ## Remaining
 
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
-- Review the local first-profile implementation and approve commit/push separately.
 - Separately approve the pinned Filesystem package execution, possible registry/download access, and
   isolated real acceptance before running it.
 - Review every later production MCP profile separately before it can emit exact assurance.
@@ -183,7 +183,7 @@ acceptance have not occurred.
 
 ## Next Recommended Task
 
-Review the network-free `list_allowed_directories` Exact Identity implementation, then commit and push
-only after explicit approval. After that, separately approve the isolated pinned-package acceptance with
-package execution and any required npm registry/download access stated independently. Every later
-production profile remains a separate Architecture Check.
+Approve the isolated pinned `@modelcontextprotocol/server-filesystem@2026.7.10` acceptance with package
+execution and any required npm registry/download access stated independently. Capture only the public
+target tool schema, invoke only `list_allowed_directories` against a disposable directory, verify exact
+receipt/audit evidence, and keep every later production profile behind its own Architecture Check.
