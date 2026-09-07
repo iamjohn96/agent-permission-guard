@@ -63,6 +63,35 @@ The audit recorder, rather than a generic interceptor, decides whether a runtime
 from the trusted authority. Portable receipt schema 1.1 carries profile evidence; existing schema 1.0
 receipts continue to verify and are never upgraded retroactively. No database migration is required.
 
+### Upstream Launch Integrity Foundation
+
+Before the MCP gateway opens its audit database or starts an upstream process, it prepares one
+runtime-authenticated, deeply frozen launch snapshot. APG resolves the command once without a shell,
+binds the exact arguments, canonical working-directory identity, and allowlisted environment, and takes
+a bounded SHA-256 snapshot of the local executable. The STDIO transport accepts only that prepared
+object and revalidates the working directory, executable identity, bytes, and complete launch digest
+immediately before connection.
+
+This is local pre-spawn integrity, not package provenance. Hashing Node, npm, npx, an interpreter, or a
+launcher does not identify scripts, packages, dependency graphs, dynamic libraries, publishers, or
+runtime behavior. Production receipts therefore remain `configured_label_only`. The foundation and its
+network-free tests are committed at `1fee336`.
+
+### Verified MCP Package Stage Foundation
+
+The accepted staging design admits only an APG-owned exact graph profile. A stage plan binds the full
+reviewed graph, exact registry artifacts and SHA-512 values, metadata expiry, resource limits,
+scripts-disabled behavior, and one private stage-root identity before a future download approval.
+Registry metadata, artifact download/private staging, project installation, staged-package startup, and
+MCP tool actions are separate authority boundaries; none authorizes another.
+
+The first implementation checkpoint is intentionally network-free and not connected to the CLI. It
+provides runtime-authenticated synthetic profiles, plans, integrity results, one-time test approvals,
+monotonic state transitions, archive-entry policy validation, and deterministic materialized-tree
+revalidation. It includes no production package profile, registry request, downloader, tar extraction,
+persistent stage, package launch, dependency, receipt change, or stronger production provenance claim.
+See `docs/verified-mcp-package-stage-architecture-check.md`.
+
 ### Install Guard
 
 - strict npm/npx parser

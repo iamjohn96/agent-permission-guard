@@ -2,14 +2,15 @@
 
 ## Current Milestone
 
-Upstream Launch Integrity Foundation implementation checkpoint. The Exact Filesystem acceptance
-checkpoint is committed and pushed at `8502e64`. The approved network-free foundation is implemented
-locally and awaits checkpoint commit and main push approval.
+Verified MCP Package Stage network-free foundation implementation checkpoint. The Upstream Launch
+Integrity Foundation is committed and pushed at `1fee336`. The package staging Architecture Check was
+accepted on 2026-09-07 and its strictly local foundation is now implemented for review.
 
-The v0 foundation keeps production receipts at `configured_label_only`, prepares and revalidates one
-immutable upstream launch snapshot, adds only synthetic trusted launch-profile machinery, and defers
-verified package staging, registry artifacts, transitive graph identity, receipt schema 1.2, and stronger
-public assurance to later Architecture Checks.
+The implementation accepts only owning-authority synthetic exact graph profiles, separates plan and
+one-time synthetic approval identities, validates injected bytes/archive descriptions and test-created
+trees, and exposes no public CLI path. Real registry access, package download, archive extraction,
+persistent staging, production profiles, receipt schema 1.2, and package startup remain separately
+gated.
 
 ## Completed
 
@@ -77,7 +78,7 @@ public assurance to later Architecture Checks.
   - temporary workspace and npm cache removed after every attempt
 - Exact Filesystem acceptance checkpoint committed and pushed at `8502e64`
 - Upstream Provenance v0 Architecture Check accepted on 2026-09-07
-- Network-free Upstream Launch Integrity Foundation implemented locally:
+- Network-free Upstream Launch Integrity Foundation implemented and committed:
   - deterministic shell-free absolute command resolution with empty PATH entries ignored
   - canonical cwd and exact cloned/frozen arguments and allowlisted environment
   - working-directory device/inode/mode binding and immediate replacement detection
@@ -87,17 +88,29 @@ public assurance to later Architecture Checks.
   - owning-authority authentication for synthetic launch-profile results
   - sanitized stable failures without raw path, argument, environment, or file-byte disclosure
   - explicit configured-label-only and direct-bypass UX
+- Upstream Launch Integrity Foundation checkpoint committed and pushed at `1fee336`
+- Verified MCP Package Stage Architecture Check accepted on 2026-09-07
+- Network-free Verified MCP Package Stage foundation implemented locally:
+  - immutable canonical graph/profile and stage-plan identities
+  - profile/plan/integrity/stage runtime authorities with forgery rejection
+  - one-time synthetic approval binding with replay and cross-plan rejection
+  - streaming SHA-512 over injected local byte streams with bounded aggregate limits
+  - portable synthetic archive entry validation without tar parsing or extraction
+  - deterministic no-follow tree manifest, exact package/dependency/lifecycle/entrypoint validation,
+    and complete mutation revalidation
+  - monotonic failure/invalid states and matching synthetic audit evidence before a test-only seal
+  - bounded privacy-safe errors and no production receipt or policy behavior change
 
 ## In Progress
 
-- Review the local Upstream Launch Integrity Foundation implementation and approve its checkpoint commit
-  and main push.
+- Verify the local network-free foundation with targeted and full regression tests, then review it for a
+  checkpoint commit and main push.
 
 ## Remaining
 
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
-- Separately architecture-check a Verified MCP Package Stage before any production package provenance
-  profile or stronger receipt assurance.
+- Separately approve archive dependency selection, production graph profile, registry confirmation,
+  artifact download/stage creation, receipt 1.2, and package startup.
 - Review every later production MCP profile separately before it can emit exact assurance.
 - Select signing and trust architecture only after receipt semantics, verifier behavior, and identity
   assurance are accepted.
@@ -155,6 +168,10 @@ public assurance to later Architecture Checks.
 - Pre-spawn executable revalidation narrows but cannot eliminate the final OS-load race. It does not
   cover interpreter-selected scripts, imported modules, dynamic libraries, child processes, packages,
   publishers, dependency graphs, or runtime attestation.
+- Verified MCP package staging is foundation-only. The current synthetic authorities and injected
+  adapters are not connected to the CLI, Dashboard, durable audit DB, registry, archive extraction,
+  persistence, or launch. No archive library, production graph profile, receipt 1.2 evidence, or staged
+  launch exists yet.
 - The first profile identifies an exact zero-parameter adapter action, not the directories
   returned by the tool. The result can disclose private absolute paths to the MCP client/model.
 - The Filesystem server can replace allowed directories through MCP Roots. A request receipt cannot prove
@@ -164,7 +181,11 @@ public assurance to later Architecture Checks.
 
 ## Tests
 
-- Current full network-free local suite: 176 passed, 3 skipped on 2026-09-07.
+- Current full network-free local suite: 188 passed, 3 skipped on 2026-09-07.
+- Verified MCP Package Stage foundation coverage: 12 passed across profile/plan canonical identity,
+  authority forgery, metadata expiry, approval replay/substitution, streaming SHA-512 ordering and
+  limits, archive traversal/link/special-file/ambiguity rejection, deterministic exact package trees,
+  mode/link/layout/byte drift, terminal states, dual synthetic audit evidence, and bounded errors.
 - Upstream Launch Integrity focused coverage: 14 passed across deterministic resolution, empty PATH,
   symlinks, immutable configuration, digest binding, executable drift/no-spawn, forged dispatch,
   bounded target checks, private-value-safe failures, and synthetic profile authentication.
@@ -204,6 +225,6 @@ public assurance to later Architecture Checks.
 
 ## Next Recommended Task
 
-Review and approve the Upstream Launch Integrity Foundation checkpoint commit and main push. After that,
-perform a separate Verified MCP Package Stage Architecture Check before any registry access, package
-download/staging, package startup, production launch profile, or stronger provenance claim.
+Review and approve the Verified MCP Package Stage network-free foundation checkpoint commit and main
+push. After that, perform an Archive Adapter Dependency Security Check and prepare library-independent
+adversarial fixtures before adding any dependency or extracting any real package archive.

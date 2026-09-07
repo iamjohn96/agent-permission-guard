@@ -1,5 +1,35 @@
 # Architecture Decisions
 
+## Verified MCP staging starts with one closed graph and non-transitive approvals
+
+Date: 2026-09-07
+
+Context: Hashing a configured npm/npx launcher does not bind the package code, dependency graph, or
+materialized files that a future MCP process executes. A general npm resolver would place too much
+mutable package-manager behavior inside APG's trust boundary.
+
+Decision: The first verified package stage accepts only an APG-shipped exact package/version/artifact/
+dependency-layout profile. Metadata confirmation, package download/private staging, project install,
+package startup, and MCP tool action remain separate authority boundaries. Integrity must succeed before
+archive inspection; scripts stay disabled; a complete normalized file tree is revalidated before a
+future launch. Begin with network-free authenticated types, validators, state, and synthetic adapters;
+ship no production profile or external action in this checkpoint.
+
+Alternatives: Continue launching `npx package@version`; trust a lockfile and npm exit status; implement a
+general resolver; reuse npm's cache as the durable stage; select a tar implementation immediately.
+
+Reason: A closed reviewed graph and consequence-specific approvals make the strongest evidence APG can
+honestly support at the package-action layer without claiming publisher trust, reproducible builds,
+runtime safety, containment, or attestation.
+
+Trade-offs: No real package can use the foundation yet. The first production profile will support fewer
+packages, archive handling remains blocked on a dependency/security review, and same-user/root races
+remain until stronger OS containment or descriptor-based launch primitives exist.
+
+Revisit If: A production exact graph is accepted, maintained archive handling is approved, npm
+provenance is added as a separate assurance dimension, or runtime sandboxing/attestation becomes part of
+the product boundary.
+
 ## IG3 uses an immutable execution-plan identity
 
 Date: 2026-09-01

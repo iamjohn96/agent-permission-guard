@@ -1,7 +1,7 @@
 # Upstream Provenance v0 Architecture Check
 
 Status: accepted by Jonny on 2026-09-07. The network-free Upstream Launch Integrity Foundation is
-implemented locally and awaits checkpoint commit and push approval. No production launch profile,
+committed and pushed at `1fee336`. No production launch profile,
 package download, registry access, external package execution, dependency change, database migration,
 receipt schema change, or stronger public provenance claim was added.
 
