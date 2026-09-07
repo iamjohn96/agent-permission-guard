@@ -2,13 +2,16 @@
 
 ## Current Milestone
 
-First production Exact MCP Identity profile: network-free implementation for
-`list_allowed_directories` is committed and pushed at `035bef6`.
+First production Exact MCP Identity profile: pinned Filesystem runtime acceptance is complete locally.
+The network-free implementation for `list_allowed_directories` is committed and pushed at `035bef6`;
+the acceptance harness, captured runtime schema correction, and evidence documentation await checkpoint
+commit and push approval.
 
 The first opt-in production profile has explicit CLI selection, startup schema preflight, target-only
-exact-required behavior, privacy-safe UX, and network-free coverage. The remaining task in this milestone
-is the separately approved pinned-package acceptance. Package execution, registry access, and real
-Filesystem MCP acceptance have not occurred.
+exact-required behavior, privacy-safe UX, and network-free coverage. Its dedicated opt-in acceptance
+cannot run the broader Everything/read-file checks. The first approved run failed closed before tool
+dispatch because the pinned runtime advertised draft-07 rather than the fixture's draft 2020-12 marker.
+After capturing and binding the public target schema, the final pinned acceptance passed.
 
 ## Completed
 
@@ -65,11 +68,21 @@ Filesystem MCP acceptance have not occurred.
   - profile manifest and optional observed-schema digests
   - receipt/envelope schema 1.1 evidence with schema 1.0 compatibility
   - approval/Dashboard identity presentation and synthetic network-free coverage
+- First production Exact Filesystem profile real acceptance:
+  - fixed `@modelcontextprotocol/server-filesystem@2026.7.10`; never `latest`
+  - credential-free private npm HOME/cache/prefix/TMPDIR and empty user/global configs
+  - lifecycle scripts disabled and no broader Everything or content-read test execution
+  - initial draft 2020-12 fixture mismatch blocked before tool dispatch
+  - public pinned-runtime draft-07 schema captured and bound without weakening exactness
+  - exactly one `list_allowed_directories` call against a disposable directory
+  - complete `adapter_action_exact` portable receipt, valid local audit chain, and no path persistence
+  - temporary workspace and npm cache removed after every attempt
 
 ## In Progress
 
-- Pinned `@modelcontextprotocol/server-filesystem@2026.7.10` real acceptance awaiting separate approval.
-- Committed `list_allowed_directories` profile behavior:
+- Acceptance harness, runtime schema correction, and completion documentation await checkpoint commit and
+  main push approval.
+- `list_allowed_directories` profile behavior:
   - explicit CLI activation; never infer a profile from tool name, schema, annotations, or command text
   - exact zero-parameter request identity with closed arguments and schema-drift detection
   - target-only fail-closed behavior without changing Allow/Ask/Deny or other tools
@@ -78,15 +91,14 @@ Filesystem MCP acceptance have not occurred.
   - MCP text and structured result bodies omitted from audit summaries; only bounded outcome metadata is retained
   - unknown selectors fail before database open or upstream execution
   - 64 KiB observed input-schema bound and sanitized mismatch failures
-  - network-free implementation complete; pinned real-package schema capture and read-only call require
-    a separate approval within the same milestone
+  - pinned real-package schema capture and read-only call completed under separate approval
 
 ## Remaining
 
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
-- Separately approve the pinned Filesystem package execution, possible registry/download access, and
-  isolated real acceptance before running it.
 - Review every later production MCP profile separately before it can emit exact assurance.
+- Architecture-check upstream executable/package provenance before strengthening the current
+  `configured_label_only` server claim.
 - Select signing and trust architecture only after receipt semantics, verifier behavior, and identity
   assurance are accepted.
 
@@ -138,9 +150,9 @@ Filesystem MCP acceptance have not occurred.
 - MCP policy evaluation and upstream dispatch now share one cloned, deeply frozen prepared snapshot.
 - General key-name redaction is not a safe exact-identity projection. Exact assurance requires a trusted
   profile that binds every behavior-determining field and rejects unknown fields.
-- The common registry intentionally contains no production MCP profile. Configured server identity is
-  `configured_label_only`, not executable or publisher provenance.
-- The proposed first profile identifies an exact zero-parameter adapter action, not the directories
+- The common registry contains only the separately reviewed Filesystem zero-parameter production profile.
+  Configured server identity remains `configured_label_only`, not executable or publisher provenance.
+- The first profile identifies an exact zero-parameter adapter action, not the directories
   returned by the tool. The result can disclose private absolute paths to the MCP client/model.
 - The Filesystem server can replace allowed directories through MCP Roots. A request receipt cannot prove
   a fixed allowed-directory state, and APG does not currently refresh upstream tool schemas dynamically.
@@ -149,7 +161,10 @@ Filesystem MCP acceptance have not occurred.
 
 ## Tests
 
-- Current full local suite: 159 passed, 2 skipped on 2026-09-07.
+- Current full network-free local suite: 161 passed, 3 skipped on 2026-09-07.
+- Pinned Filesystem Exact Identity acceptance: 3 passed, including controlled-environment guards, exact
+  runtime schema, one target call, complete portable evidence, valid audit chain, path non-retention, and
+  temporary cleanup.
 - Exact MCP Identity focused coverage: 7 synthetic tests covering deterministic typed identity, frozen
   dispatch, field mutation, ordered lists, invalid types, unknown fields, request metadata, schema drift,
   required-exact failure, partial privacy, unsafe profile definitions, assurance spoofing, approval
@@ -183,7 +198,6 @@ Filesystem MCP acceptance have not occurred.
 
 ## Next Recommended Task
 
-Approve the isolated pinned `@modelcontextprotocol/server-filesystem@2026.7.10` acceptance with package
-execution and any required npm registry/download access stated independently. Capture only the public
-target tool schema, invoke only `list_allowed_directories` against a disposable directory, verify exact
-receipt/audit evidence, and keep every later production profile behind its own Architecture Check.
+Review and approve the acceptance checkpoint commit and main push. After that, perform an upstream
+executable/package provenance Architecture Check before either strengthening `configured_label_only` or
+adding a path-bearing second production MCP profile.

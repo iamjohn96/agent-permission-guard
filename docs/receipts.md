@@ -64,7 +64,8 @@ arbitrary tool parameters contain secrets. APG supports explicitly registered, v
 and ships one opt-in zero-parameter profile for `list_allowed_directories`. It is selected explicitly with
 `--identity-profile filesystem.list-allowed-directories.v1`; unknown tools and every unselected profile
 remain structural. The profile does not authenticate the upstream command, package, or publisher, and
-its separately approval-gated pinned-package acceptance has not yet been run.
+its separately approved pinned-package acceptance validated only the configured adapter action, schema,
+receipt, and local audit evidence—not executable or publisher provenance.
 
 A profile-bearing receipt uses schema 1.1 and declares one of these identities:
 

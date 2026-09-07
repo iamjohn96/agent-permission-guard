@@ -260,9 +260,9 @@ describe('trusted MCP identity profiles', () => {
 
 describe('built-in Filesystem exact identity profile', () => {
   const reviewedSchema = {
-    $schema: 'https://json-schema.org/draft/2020-12/schema',
     type: 'object' as const,
     properties: {},
+    $schema: 'http://json-schema.org/draft-07/schema#',
   };
 
   it('requires explicit selection and binds the reviewed empty schema', () => {

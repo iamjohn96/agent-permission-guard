@@ -9,13 +9,12 @@ export const FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID =
 
 export const FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL = 'list_allowed_directories';
 
-// This is a reviewed, network-free tools/list fixture. The separately approved
-// pinned-package acceptance must confirm that the 2026.7.10 runtime advertises
-// the same canonical schema before the profile is described as runtime-validated.
+// Captured from the public tools/list response of the pinned 2026.7.10 runtime
+// during its separately approved isolated acceptance. Future drift fails closed.
 const LIST_ALLOWED_DIRECTORIES_INPUT_SCHEMA = Object.freeze({
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object' as const,
   properties: Object.freeze({}),
+  $schema: 'http://json-schema.org/draft-07/schema#',
 });
 
 export const FILESYSTEM_LIST_ALLOWED_DIRECTORIES_SCHEMA_DIGEST =

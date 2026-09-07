@@ -166,8 +166,9 @@ selection, drift detection, approval, and receipt machinery without conflating r
 server authenticity or result identity.
 
 Trade-offs: A malicious same-shape server can still mimic the reviewed tool, schema drift causes an
-availability failure, and the result still reaches the requesting MCP client/model. The checked-in schema
-fixture remains runtime-unvalidated until a separately approved pinned-package acceptance is run.
+availability failure, and the result still reaches the requesting MCP client/model. The first approved
+pinned-package run rejected the SDK 2.x fixture before dispatch, captured the package's draft-07 wire
+schema, and the corrected profile then passed a target-only real acceptance with exact receipt evidence.
 
 Revisit If: The pinned runtime advertises a different schema, executable provenance becomes available,
 APG handles dynamic tool-list changes, or a result-identity design can protect private paths.

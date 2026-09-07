@@ -54,9 +54,10 @@ Other operations retain structural identity and existing policy behavior.
 
 This profile does not authenticate the launched command, package, publisher, or binary. Its server
 provenance remains `configured_label_only`. Returned directory paths and dynamic MCP Roots state are not
-part of request identity and are not retained in portable receipt result evidence. A separately approved
-real acceptance against the pinned Filesystem package is still required to validate the network-free
-schema fixture.
+part of request identity and are not retained in portable receipt result evidence. The separately
+approved real acceptance against `@modelcontextprotocol/server-filesystem@2026.7.10` validated the
+captured draft-07 wire schema, one target-only call, exact receipt evidence, and the audit chain in an
+isolated credential-free npm environment.
 
 The audit recorder, rather than a generic interceptor, decides whether a runtime identity result came
 from the trusted authority. Portable receipt schema 1.1 carries profile evidence; existing schema 1.0

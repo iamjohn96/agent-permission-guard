@@ -1,7 +1,8 @@
 # Filesystem `list_allowed_directories` Exact Identity Architecture Check
 
-Status: accepted by Jonny on 2026-09-07. The network-free implementation is complete locally and awaits
-review/commit approval. Package execution, registry access, and a real MCP call remain unapproved.
+Status: accepted by Jonny on 2026-09-07. The network-free implementation is committed and pushed. The
+dedicated opt-in acceptance first failed closed on wire-schema drift, then passed after binding the
+captured pinned-runtime draft-07 schema. The acceptance checkpoint awaits commit and push approval.
 
 Date: 2026-09-07
 
@@ -177,6 +178,17 @@ The reviewed TypeScript source declares `inputSchema: {}`, but the MCP SDK may s
 schema into a richer JSON Schema object. The production profile must bind the exact bounded
 `tools/list` schema observed from the pinned runtime rather than guessing that wire representation from
 source.
+
+The first approved run observed this public wire schema from
+`@modelcontextprotocol/server-filesystem@2026.7.10`:
+
+```json
+{"type":"object","properties":{},"$schema":"http://json-schema.org/draft-07/schema#"}
+```
+
+The prior network-free fixture used the SDK 2.x draft 2020-12 marker. Exact preflight rejected that drift
+before downstream service or tool dispatch, after which the fixture was corrected to the captured pinned
+runtime value. No matching rule was weakened.
 
 Implementation proceeds in two approval-separated parts within this milestone:
 
@@ -360,12 +372,17 @@ All default tests remain network-free.
 ### Separately approved real acceptance
 
 - use `@modelcontextprotocol/server-filesystem@2026.7.10`, never `latest`
+- use the dedicated `filesystem-identity-acceptance.test.ts`; do not run the broader official-server file
 - use a newly created private temporary directory as the sole command-line allowed directory
-- use a private temporary npm cache and HOME where supported by the test harness
+- use an absolute discovered `npx` path through a fixed-package wrapper
+- use a private temporary npm cache, prefix, HOME, TMPDIR, working directory, and empty user/global npm configs
+- forward no credential, proxy, custom registry, Node option, or user configuration environment values
+- disable lifecycle scripts, audit, funding messages, and update notifications
 - do not read project files, user files, `.npmrc`, `.env`, tokens, keys, or credentials
 - perform `tools/list`, verify the target schema, and invoke only `list_allowed_directories`
 - assert exact profile evidence and a valid audit chain
 - assert the result refers only to the disposable directory
+- assert no disposable path is persisted in tool-call rows, receipt events, or the exported receipt
 - remove the temporary workspace after the test; report whether npm cache cleanup is complete
 
 The acceptance test does not prove package provenance or absence of package startup side effects.
@@ -461,3 +478,8 @@ download are each expected before it runs.
 
 Accepted decision: implement only the network-free scope above and keep the real pinned-package
 acceptance as a separate explicit approval inside the same milestone.
+
+Completed evidence: the approved pinned-package acceptance used a private temporary npm environment,
+captured the public draft-07 target schema after an initial fail-closed mismatch, invoked only
+`list_allowed_directories`, verified `adapter_action_exact` portable evidence and the local audit chain,
+confirmed returned paths were not persisted, and removed the temporary workspace and cache.

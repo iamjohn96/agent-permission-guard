@@ -98,9 +98,10 @@ and other tools remain structural. The result can disclose current allowed direc
 client; those paths are not added to portable receipt identity evidence. Direct MCP connections that do
 not pass through this proxy remain unprotected.
 
-The network-free fixture for this profile is implemented, but the separately approval-gated acceptance
-against `@modelcontextprotocol/server-filesystem@2026.7.10` has not yet been run. A schema mismatch fails
-closed rather than silently downgrading.
+The separately approved acceptance against `@modelcontextprotocol/server-filesystem@2026.7.10` passed
+with the pinned runtime's draft-07 wire schema, one `list_allowed_directories` call, exact portable
+receipt evidence, a valid audit chain, and no returned path retained in audit or receipt evidence. A
+future schema mismatch still fails closed rather than silently downgrading.
 
 ## Current milestone
 
@@ -150,6 +151,20 @@ APG_REAL_MCP_E2E=1 npm test -- test/integration/official-servers.test.ts
 That command allows `npx` to download and execute the two reviewed reference packages. Run it only in a disposable development environment after approving external package execution. The Filesystem server is restricted to a test-created temporary directory.
 
 The compatibility test pins the npm-published versions `@modelcontextprotocol/server-everything@2026.8.18` and `@modelcontextprotocol/server-filesystem@2026.7.10` rather than following `latest`.
+
+The narrower Exact Identity acceptance is isolated in its own opt-in file so it cannot execute the
+Everything server or any Filesystem content-read tool:
+
+```sh
+APG_REAL_FILESYSTEM_IDENTITY_E2E=1 npm test -- test/integration/filesystem-identity-acceptance.test.ts
+```
+
+That command may access the public npm registry, download the pinned Filesystem package into a private
+temporary cache, and execute its startup code. It uses empty temporary npm configuration files, disables
+lifecycle scripts, exposes only a disposable allowed directory, calls only `list_allowed_directories`,
+and removes the temporary workspace afterward. Run it only after separately approving registry access,
+package download, and external package execution. It does not authenticate the package publisher or
+contain startup effects at the operating-system level.
 
 Only run upstream commands that you trust and have explicitly reviewed.
 

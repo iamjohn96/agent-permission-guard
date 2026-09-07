@@ -14,6 +14,7 @@ type ClientMode = 'legacy' | 'auto';
 
 const openClients: Client[] = [];
 const fixtureServer = resolve('dist/test/fixtures/mock-mcp-server.js');
+const exactFilesystemFixtureServer = resolve('dist/test/fixtures/exact-filesystem-mcp-server.js');
 const gatewayCli = resolve('dist/src/cli/main.js');
 const denyGateway = resolve('dist/test/fixtures/deny-gateway.js');
 const auditFailureGateway = resolve('dist/test/fixtures/audit-failure-gateway.js');
@@ -352,7 +353,11 @@ async function connectGateway(
   if (identityProfileId !== undefined) {
     args.push('--identity-profile', identityProfileId);
   }
-  args.push('--', process.execPath, fixtureServer);
+  args.push(
+    '--',
+    process.execPath,
+    identityProfileId === undefined ? fixtureServer : exactFilesystemFixtureServer,
+  );
 
   const transport = new StdioClientTransport({
     command: process.execPath,
