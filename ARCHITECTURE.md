@@ -92,6 +92,19 @@ revalidation. It includes no production package profile, registry request, downl
 persistent stage, package launch, dependency, receipt change, or stronger production provenance claim.
 See `docs/verified-mcp-package-stage-architecture-check.md`.
 
+The accepted archive-adapter security boundary prefers an exact pinned `tar/parse` candidate but keeps
+all library filesystem APIs outside APG's design. The first archive grammar is gzip-wrapped USTAR only;
+PAX, GNU extensions, links, special files, warnings, recovery, and ambiguous end states fail closed.
+Inspection and materialization are separate passes over a revalidated artifact and must match one
+authenticated ordered transcript including body hashes. APG alone will own future exclusive no-follow
+filesystem writes, and no scratch output becomes runnable before complete validation and sealing.
+
+The current archive fixture checkpoint remains parser-free. A test-only deterministic USTAR/gzip byte
+builder produces valid controls, gzip/tar ambiguity and corruption, PAX/GNU parser-smuggling cases,
+semantic path/type/resource attacks, and equal-length cross-pass substitutions. It imports no candidate
+archive library and performs no real package extraction. See
+`docs/archive-adapter-dependency-security-check.md`.
+
 ### Install Guard
 
 - strict npm/npx parser

@@ -2,9 +2,10 @@
 
 ## Current Milestone
 
-Verified MCP Package Stage network-free foundation checkpoint is committed and pushed at `92553b3`.
-The next proposed milestone is an Archive Adapter Dependency Security Check before any archive
-dependency is selected or any real package archive is parsed or extracted.
+The Archive Adapter Dependency Security Check is accepted. Its library-independent adversarial fixture
+foundation is implemented and verified locally: deterministic test-only USTAR/gzip bytes, explicit
+expected transcripts, layered format/policy/limit failures, and equal-length cross-pass substitutions.
+No archive dependency has been added and no real package archive has been parsed or extracted.
 
 The committed foundation accepts only owning-authority synthetic exact graph profiles, separates plan
 and one-time synthetic approval identities, validates injected bytes/archive descriptions and
@@ -101,11 +102,24 @@ separately gated.
   - monotonic failure/invalid states and matching synthetic audit evidence before a test-only seal
   - bounded privacy-safe errors and no production receipt or policy behavior change
 - Verified MCP Package Stage foundation checkpoint committed and pushed at `92553b3`
+- Archive Adapter Dependency Security Check accepted on 2026-09-07:
+  - exact pinned `tar/parse` is the conditional parser-only candidate
+  - library extraction, member-selection, and filesystem-writing APIs are prohibited
+  - v0 accepts only bounded gzip-wrapped USTAR and rejects PAX/GNU extensions
+  - inspection and materialization require matching two-pass authenticated transcript semantics
+- Library-independent archive adversarial fixture foundation implemented:
+  - deterministic test-only USTAR header/body/padding/end-block builder
+  - deterministic test-only single-member gzip writer with stored DEFLATE, CRC-32, and size trailer
+  - 52 fixtures across valid controls, gzip/tar corruption and ambiguity, parser-smuggling metadata,
+    semantic path/type attacks, and resource ceilings
+  - explicit ordered transcript expectations with body SHA-256
+  - three equal-length cross-pass header/order/body substitutions
+  - no archive candidate import, dependency change, filesystem materialization, or real package bytes
 
 ## In Progress
 
-- No package-stage source implementation is currently in progress. The next work requires an
-  Architecture Check before dependency selection or real archive handling.
+- No production archive adapter, dependency selection, or real archive handling is in progress. The
+  local fixture checkpoint is ready for diff review and separate commit/push approval.
 
 ## Remaining
 
@@ -146,6 +160,8 @@ separately gated.
   does not write audit rows, run migrations, or modify the main database bytes.
 - Missing terminal evidence remains incomplete. Automatic recovery mutation is deferred until an
   exclusive-writer/session-ownership mechanism exists.
+- Archive handling must use the exact reviewed parser-only import, reject extension metadata in v0, and
+  match a complete write-free transcript before APG-owned materialization can be sealed.
 
 ## Known Issues
 
@@ -173,16 +189,28 @@ separately gated.
   adapters are not connected to the CLI, Dashboard, durable audit DB, registry, archive extraction,
   persistence, or launch. No archive library, production graph profile, receipt 1.2 evidence, or staged
   launch exists yet.
+- The preferred archive parser remains an unapproved third-party candidate. Its exact registry artifact,
+  integrity, APG lock graph, licenses, supported-Node behavior, and candidate-backed fixture results have
+  not been verified. Current fixtures validate bytes and synthetic policy only, not a real parser.
 - The first profile identifies an exact zero-parameter adapter action, not the directories
   returned by the tool. The result can disclose private absolute paths to the MCP client/model.
 - The Filesystem server can replace allowed directories through MCP Roots. A request receipt cannot prove
   a fixed allowed-directory state, and APG does not currently refresh upstream tool schemas dynamically.
 - The local SHA-256 event chain can be recomputed by an actor with full database write access; stronger
   issuer and history guarantees require a separately approved signing and anchoring architecture.
+- The default parallel full suite can intermittently starve the STDIO/Dashboard integration's fixed
+  five-second deadlines on this host. The affected file passes 28/28 in isolation and the complete
+  final suite passes with one worker; this checkpoint changes no gateway or dashboard production code.
 
 ## Tests
 
-- Current full network-free local suite: 188 passed, 3 skipped on 2026-09-07.
+- Current final network-free local suite with one worker: 195 passed, 3 skipped on 2026-09-07.
+- Archive adversarial fixture coverage: 7 passed over 52 archive fixtures and 3 cross-pass substitutions,
+  including deterministic USTAR/gzip generation, explicit transcript golden values, layered rejection,
+  existing portable-policy behavior, gzip multi-member ambiguity, and dependency/import absence.
+- STDIO/Dashboard integration focused retry: 28 passed. Default parallel full retries encountered
+  pre-existing fixed-deadline timeouts under contention; the same final suite passed with
+  `--maxWorkers=1`.
 - Verified MCP Package Stage foundation coverage: 12 passed across profile/plan canonical identity,
   authority forgery, metadata expiry, approval replay/substitution, streaming SHA-512 ordering and
   limits, archive traversal/link/special-file/ambiguity rejection, deterministic exact package trees,
@@ -226,6 +254,7 @@ separately gated.
 
 ## Next Recommended Task
 
-Perform an Archive Adapter Dependency Security Check and prepare library-independent adversarial
-fixtures. Do not add a dependency or parse/extract a real package archive until that check and its exact
-implementation consequence receive separate approval.
+Perform an Exact Archive Parser Artifact & Lock Graph Review for the preferred `tar/parse` candidate.
+This next checkpoint requires separate approval for anonymous public-registry metadata reads and an
+isolated credential-free lockfile-only preview. Do not add the dependency to APG, execute parser code,
+or parse/extract a real package archive until the exact resulting graph and command receive approval.

@@ -1,5 +1,33 @@
 # Architecture Decisions
 
+## Archive handling uses a parser-only candidate, a narrower grammar, and two matching passes
+
+Date: 2026-09-07
+
+Context: Verified package staging needs to interpret untrusted registry archives after integrity
+verification. A parser and extractor that disagree can hide members, while a general extraction API
+places path, link, ownership, and filesystem mutation behavior inside a third-party trust boundary.
+
+Decision: Prefer an exact separately reviewed `tar/parse` version as a parser-only candidate. Prohibit
+all node-tar filesystem-writing and member-selection APIs. The first profile accepts only bounded
+gzip-wrapped USTAR, rejects PAX/GNU extensions and all non-file/directory types, and requires a complete
+write-free inspection transcript followed by a second identical parse and APG-owned no-follow
+materialization. Build adversarial fixture bytes independently before adding the candidate dependency.
+
+Alternatives: Use node-tar extraction; use `tar-stream`; invoke system tar; implement a custom parser;
+admit PAX/GNU metadata in v0; inspect once and extract through another implementation.
+
+Reason: Parser-only use plus a deliberately narrow grammar and same-parser transcript comparison reduces
+filesystem escape and interpretation-differential exposure while retaining a maintained parser candidate.
+
+Trade-offs: `tar` still has a significant security history and installs unused broader APIs. USTAR-only
+support will reject some legitimate packages. Parser zero-days and same-user/root races remain, and the
+exact registry artifact, APG lock graph, licenses, and Node-version behavior are not yet approved.
+
+Revisit If: The preferred candidate fails the exact artifact/lock review or adversarial corpus, a
+narrower maintained parser becomes available, the first exact package requires an extension grammar,
+or OS isolation changes the filesystem boundary.
+
 ## Verified MCP staging starts with one closed graph and non-transitive approvals
 
 Date: 2026-09-07
