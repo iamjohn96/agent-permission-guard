@@ -2,15 +2,15 @@
 
 ## Current Milestone
 
-Verified MCP Package Stage network-free foundation implementation checkpoint. The Upstream Launch
-Integrity Foundation is committed and pushed at `1fee336`. The package staging Architecture Check was
-accepted on 2026-09-07 and its strictly local foundation is now implemented for review.
+Verified MCP Package Stage network-free foundation checkpoint is committed and pushed at `92553b3`.
+The next proposed milestone is an Archive Adapter Dependency Security Check before any archive
+dependency is selected or any real package archive is parsed or extracted.
 
-The implementation accepts only owning-authority synthetic exact graph profiles, separates plan and
-one-time synthetic approval identities, validates injected bytes/archive descriptions and test-created
-trees, and exposes no public CLI path. Real registry access, package download, archive extraction,
-persistent staging, production profiles, receipt schema 1.2, and package startup remain separately
-gated.
+The committed foundation accepts only owning-authority synthetic exact graph profiles, separates plan
+and one-time synthetic approval identities, validates injected bytes/archive descriptions and
+test-created trees, and exposes no public CLI path. Real registry access, package download, archive
+extraction, persistent staging, production profiles, receipt schema 1.2, and package startup remain
+separately gated.
 
 ## Completed
 
@@ -90,7 +90,7 @@ gated.
   - explicit configured-label-only and direct-bypass UX
 - Upstream Launch Integrity Foundation checkpoint committed and pushed at `1fee336`
 - Verified MCP Package Stage Architecture Check accepted on 2026-09-07
-- Network-free Verified MCP Package Stage foundation implemented locally:
+- Network-free Verified MCP Package Stage foundation implemented:
   - immutable canonical graph/profile and stage-plan identities
   - profile/plan/integrity/stage runtime authorities with forgery rejection
   - one-time synthetic approval binding with replay and cross-plan rejection
@@ -100,11 +100,12 @@ gated.
     and complete mutation revalidation
   - monotonic failure/invalid states and matching synthetic audit evidence before a test-only seal
   - bounded privacy-safe errors and no production receipt or policy behavior change
+- Verified MCP Package Stage foundation checkpoint committed and pushed at `92553b3`
 
 ## In Progress
 
-- Verify the local network-free foundation with targeted and full regression tests, then review it for a
-  checkpoint commit and main push.
+- No package-stage source implementation is currently in progress. The next work requires an
+  Architecture Check before dependency selection or real archive handling.
 
 ## Remaining
 
@@ -225,6 +226,6 @@ gated.
 
 ## Next Recommended Task
 
-Review and approve the Verified MCP Package Stage network-free foundation checkpoint commit and main
-push. After that, perform an Archive Adapter Dependency Security Check and prepare library-independent
-adversarial fixtures before adding any dependency or extracting any real package archive.
+Perform an Archive Adapter Dependency Security Check and prepare library-independent adversarial
+fixtures. Do not add a dependency or parse/extract a real package archive until that check and its exact
+implementation consequence receive separate approval.

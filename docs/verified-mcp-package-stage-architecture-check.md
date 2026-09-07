@@ -1,9 +1,9 @@
 # Verified MCP Package Stage Architecture Check
 
-Status: accepted by Jonny on 2026-09-07. The approved network-free foundation is implemented locally
-and awaits checkpoint commit and push approval. This acceptance authorizes no registry request, package
-download, real archive extraction, package installation, package startup, dependency change, database
-migration, receipt schema change, commit, or push.
+Status: accepted by Jonny on 2026-09-07. The approved network-free foundation is committed and pushed
+at `92553b3`. This acceptance authorizes no registry request, package download, real archive extraction,
+package installation, package startup, dependency change, database migration, receipt schema change,
+or later external write.
 
 ## Decision summary
 
