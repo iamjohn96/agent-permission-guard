@@ -42,9 +42,21 @@ Identity assurance is explicit:
 - `execution_plan_exact`: a separate immutable execution plan, currently used by Install Guard
 
 Unknown fields, invalid types, schema drift, unsupported request metadata, and profile failures cannot
-produce exact assurance. The common implementation contains no production MCP profile, so normal MCP
-calls remain `structural_only` today. A policy-selectable exact requirement and each production profile
-remain separate approval boundaries.
+produce exact assurance. Normal MCP calls remain `structural_only` unless a reviewed built-in profile is
+selected explicitly. Each later production profile remains a separate approval boundary.
+
+The first opt-in production profile is `filesystem.list-allowed-directories.v1`. It covers only the
+zero-parameter `list_allowed_directories` operation on the configured `local-upstream` boundary. The CLI
+validates the selector before opening the database or starting upstream, then verifies the tool and its
+bounded input-schema digest during startup. Once selected, exact identity is required for that operation;
+profile mismatch blocks before policy evaluation and upstream dispatch instead of silently downgrading.
+Other operations retain structural identity and existing policy behavior.
+
+This profile does not authenticate the launched command, package, publisher, or binary. Its server
+provenance remains `configured_label_only`. Returned directory paths and dynamic MCP Roots state are not
+part of request identity and are not retained in portable receipt result evidence. A separately approved
+real acceptance against the pinned Filesystem package is still required to validate the network-free
+schema fixture.
 
 The audit recorder, rather than a generic interceptor, decides whether a runtime identity result came
 from the trusted authority. Portable receipt schema 1.1 carries profile evidence; existing schema 1.0

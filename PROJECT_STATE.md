@@ -2,11 +2,13 @@
 
 ## Current Milestone
 
-Exact MCP Identity shared foundation: implemented locally; awaiting review and commit approval.
+First production Exact MCP Identity profile: accepted network-free implementation for
+`list_allowed_directories` is complete locally; awaiting review and commit approval.
 
-The accepted architecture now has common machinery for reviewed MCP profiles, immutable approval-to-
-dispatch request binding, receipt schema 1.1 profile evidence, and synthetic network-free coverage. No
-production MCP profile or production exact-identity policy rule has been added.
+The shared Exact MCP Identity foundation is committed and pushed at `f9da468`. The first opt-in production
+profile now has explicit CLI selection, startup schema preflight, target-only exact-required behavior,
+privacy-safe UX, and network-free coverage. Package execution, registry access, and real Filesystem MCP
+acceptance have not occurred.
 
 ## Completed
 
@@ -56,27 +58,35 @@ production MCP profile or production exact-identity policy rule has been added.
   - legacy-incomplete and started-without-terminal incomplete projection
   - explicit post-dispatch `audit_failed` incomplete semantics without action retry
   - Dashboard Action ID visibility and receipt usage documentation
+- Exact MCP Identity shared foundation, committed and pushed at `f9da468`:
+  - cloned and deeply frozen `PreparedToolCall` as the only upstream dispatch payload
+  - centralized `McpIdentityAuthority` with runtime-trusted result provenance
+  - closed typed safe projection fields and exact/partial/rejected/structural invariants
+  - profile manifest and optional observed-schema digests
+  - receipt/envelope schema 1.1 evidence with schema 1.0 compatibility
+  - approval/Dashboard identity presentation and synthetic network-free coverage
 
 ## In Progress
 
-- Exact MCP Identity shared foundation is complete locally:
-  - cloned and deeply frozen `PreparedToolCall` is the only upstream dispatch payload
-  - centralized `McpIdentityAuthority` with runtime-trusted result provenance
-  - closed string, enum, integer, boolean, null, ordered-list, and optional field definitions
-  - exact, partial, rejected, and structural identity invariants
-  - profile manifest and optional observed-schema digests
-  - profile-bearing receipt/envelope schema 1.1 with existing 1.0 compatibility
-  - trusted safe identity shown separately in approval data and Dashboard labels
-  - synthetic tests for mutation, schema drift, unknown fields, spoofing, privacy, and receipt verification
-- Source, tests, Dashboard labels, architecture, and state are awaiting review. No production profile,
-  production policy semantic change, dependency, database migration, external service, or secret handling
-  was added.
+- Accepted `list_allowed_directories` profile implementation:
+  - explicit CLI activation; never infer a profile from tool name, schema, annotations, or command text
+  - exact zero-parameter request identity with closed arguments and schema-drift detection
+  - target-only fail-closed behavior without changing Allow/Ask/Deny or other tools
+  - configured-label-only server provenance; no official binary or publisher claim
+  - returned directory paths and dynamic MCP Roots state excluded from request identity and receipts
+  - MCP text and structured result bodies omitted from audit summaries; only bounded outcome metadata is retained
+  - unknown selectors fail before database open or upstream execution
+  - 64 KiB observed input-schema bound and sanitized mismatch failures
+  - network-free implementation complete; pinned real-package schema capture and read-only call require
+    a separate approval within the same milestone
 
 ## Remaining
 
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
-- Review, commit, and push the Exact MCP Identity shared foundation after explicit approval.
-- Review each production MCP profile separately before it can emit exact assurance.
+- Review the local first-profile implementation and approve commit/push separately.
+- Separately approve the pinned Filesystem package execution, possible registry/download access, and
+  isolated real acceptance before running it.
+- Review every later production MCP profile separately before it can emit exact assurance.
 - Select signing and trust architecture only after receipt semantics, verifier behavior, and identity
   assurance are accepted.
 
@@ -130,12 +140,16 @@ production MCP profile or production exact-identity policy rule has been added.
   profile that binds every behavior-determining field and rejects unknown fields.
 - The common registry intentionally contains no production MCP profile. Configured server identity is
   `configured_label_only`, not executable or publisher provenance.
+- The proposed first profile identifies an exact zero-parameter adapter action, not the directories
+  returned by the tool. The result can disclose private absolute paths to the MCP client/model.
+- The Filesystem server can replace allowed directories through MCP Roots. A request receipt cannot prove
+  a fixed allowed-directory state, and APG does not currently refresh upstream tool schemas dynamically.
 - The local SHA-256 event chain can be recomputed by an actor with full database write access; stronger
   issuer and history guarantees require a separately approved signing and anchoring architecture.
 
 ## Tests
 
-- Current full local suite: 147 passed, 2 skipped on 2026-09-07.
+- Current full local suite: 159 passed, 2 skipped on 2026-09-07.
 - Exact MCP Identity focused coverage: 7 synthetic tests covering deterministic typed identity, frozen
   dispatch, field mutation, ordered lists, invalid types, unknown fields, request metadata, schema drift,
   required-exact failure, partial privacy, unsafe profile definitions, assurance spoofing, approval
@@ -148,6 +162,10 @@ production MCP profile or production exact-identity policy rule has been added.
 - M0 focused suite: 30 passed across dashboard authorization, private state, and STDIO proxy rotation tests.
 - M0 coverage includes instance matching, foreign origin rejection, origin-less native authorization, stale credential rejection, strict state URL validation, and same-URL/same-PID replacement safety.
 - Default tests must remain network-free; live registry or installation checks are opt-in and approval-gated.
+- First-profile coverage includes explicit selection, zero-field completeness, schema preflight, missing/
+  duplicate/drift/oversize failures, private input non-disclosure, unknown-selector pre-launch failure,
+  target-only enforcement, upstream no-forward, unchanged Deny behavior, and structured result-body
+  non-retention.
 
 ## Do Not Change
 
@@ -165,8 +183,7 @@ production MCP profile or production exact-identity policy rule has been added.
 
 ## Next Recommended Task
 
-Review the Exact MCP Identity shared-foundation diff, then commit and push only after explicit approval.
-After it lands, choose one production MCP tool for a focused profile Architecture Check covering tool
-semantics, sensitive fields, account/target identity, schema drift, and consequence boundaries. Production
-policy enforcement, signing keys, database migrations, dependencies, external anchors, and public
-cryptographic-attestation claims remain separate approval boundaries.
+Review the network-free `list_allowed_directories` Exact Identity implementation, then commit and push
+only after explicit approval. After that, separately approve the isolated pinned-package acceptance with
+package execution and any required npm registry/download access stated independently. Every later
+production profile remains a separate Architecture Check.

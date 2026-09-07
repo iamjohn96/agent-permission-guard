@@ -62,13 +62,17 @@ function renderApprovals(requests) {
       identity.append(
         element('strong', '', `Identity: ${identityLabel}`),
         element('span', '', `Coverage: ${request.identity.parameterCoverage}${profile}`),
+        element('span', '', 'Server provenance: Configured label only'),
+        element('span', '', 'Protected only when this MCP call is routed through APG; downstream results and effects are not verified.'),
       );
     }
     const pre = element('pre');
     pre.textContent = JSON.stringify(
       request.identity?.safeClaims?.length
         ? { safeIdentityClaims: request.identity.safeClaims }
-        : { redactedArguments: request.arguments },
+        : request.identity?.assurance === 'adapter_action_exact'
+          ? { parameters: 'None', safeIdentityClaims: [] }
+          : { redactedArguments: request.arguments },
       null,
       2,
     );

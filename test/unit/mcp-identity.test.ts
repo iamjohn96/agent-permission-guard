@@ -1,3 +1,4 @@
+import type { CallToolRequestParams } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 
 import { PortableReceiptService, serializePortableReceipt, verifyPortableReceipt } from '../../src/audit/portable-receipt.js';
@@ -7,9 +8,16 @@ import { LocalApprovalService } from '../../src/approval/service.js';
 import { openAuditDatabase } from '../../src/db/database.js';
 import { prepareToolCall } from '../../src/gateway/call-interceptor.js';
 import {
+  FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
+  FILESYSTEM_LIST_ALLOWED_DIRECTORIES_SCHEMA_DIGEST,
+  FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL,
+  selectBuiltInMcpIdentityProfile,
+} from '../../src/identity/builtin-profiles.js';
+import {
   defineMcpIdentityProfile,
   ExactMcpIdentityRequiredError,
   McpIdentityAuthority,
+  McpIdentityProfilePreflightError,
   observedInputSchemaDigest,
   optionalIdentityField,
   publicBoolean,
@@ -212,6 +220,149 @@ describe('trusted MCP identity profiles', () => {
         } as McpIdentityField,
       },
     })).toThrow(/Untrusted identity field/);
+  });
+
+  it('allows zero fields only for a complete action profile', () => {
+    const profile = defineMcpIdentityProfile({
+      id: 'synthetic.empty.v1',
+      version: 1,
+      serverId: 'synthetic-server',
+      toolName: 'empty_action',
+      parameterCoverage: 'complete_action_parameters',
+      fields: {},
+    });
+    const authority = new McpIdentityAuthority([profile]);
+
+    expect(authority.prepare('synthetic-server', { name: 'empty_action' }).result).toMatchObject({
+      assurance: 'adapter_action_exact',
+      approvalView: {
+        parameterCoverage: 'complete_action_parameters',
+        safeClaims: [],
+      },
+    });
+    expect(authority.prepare(
+      'synthetic-server',
+      { name: 'empty_action', arguments: {} },
+    ).result.identityMaterial).toEqual(
+      authority.prepare('synthetic-server', { name: 'empty_action' }).result.identityMaterial,
+    );
+    expect(() => defineMcpIdentityProfile({
+      id: 'synthetic.empty-partial.v1',
+      version: 1,
+      serverId: 'synthetic-server',
+      toolName: 'empty_partial_action',
+      parameterCoverage: 'declared_subset',
+      omittedCategories: ['private_payload'],
+      fields: {},
+    })).toThrow(/Only complete/);
+  });
+});
+
+describe('built-in Filesystem exact identity profile', () => {
+  const reviewedSchema = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    type: 'object' as const,
+    properties: {},
+  };
+
+  it('requires explicit selection and binds the reviewed empty schema', () => {
+    const selection = selectBuiltInMcpIdentityProfile(
+      FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
+    );
+
+    expect(observedInputSchemaDigest(reviewedSchema)).toBe(
+      FILESYSTEM_LIST_ALLOWED_DIRECTORIES_SCHEMA_DIGEST,
+    );
+    expect(selection.authority.isExactRequired(
+      'local-upstream',
+      FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL,
+    )).toBe(true);
+    selection.authority.preflight('local-upstream', [{
+      name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL,
+      inputSchema: reviewedSchema,
+    }]);
+
+    const omitted = selection.authority.prepare(
+      'local-upstream',
+      { name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL },
+      reviewedSchema,
+    ).result;
+    const empty = selection.authority.prepare(
+      'local-upstream',
+      { name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL, arguments: {} },
+      reviewedSchema,
+    ).result;
+    expect(omitted).toMatchObject({
+      assurance: 'adapter_action_exact',
+      approvalView: { safeClaims: [], limitation: 'all_behavior_parameters_bound' },
+      evidence: {
+        profileId: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
+        serverProvenanceAssurance: 'configured_label_only',
+      },
+    });
+    expect(empty.identityMaterial).toEqual(omitted.identityMaterial);
+  });
+
+  it('rejects request metadata and every added argument without affecting other tools', () => {
+    const { authority } = selectBuiltInMcpIdentityProfile(
+      FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
+    );
+    const invalidRequests = [
+      { name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL, arguments: { path: '/private/value' } },
+      { name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL, arguments: [], },
+      { name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL, arguments: {}, _meta: { progressToken: 'private' } },
+      { name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL, arguments: {}, task: { ttl: 30 } },
+    ] as const;
+
+    for (const request of invalidRequests) {
+      const result = authority.prepare(
+        'local-upstream',
+        request as unknown as CallToolRequestParams,
+        reviewedSchema,
+      ).result;
+      expect(result.assurance).toBe('structural_only');
+      expect(result.approvalView.profileStatus).toBe('rejected');
+      expect(JSON.stringify(result)).not.toContain('/private/value');
+    }
+    const other = authority.prepare(
+      'local-upstream',
+      { name: 'other_tool', arguments: { private: 'not-projected' } },
+    ).result;
+    expect(other.assurance).toBe('structural_only');
+    expect(other.evidence).toBeUndefined();
+    expect(authority.isExactRequired('local-upstream', 'other_tool')).toBe(false);
+  });
+
+  it('fails preflight on missing, duplicate, changed, or oversized schemas', () => {
+    const selection = selectBuiltInMcpIdentityProfile(
+      FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
+    );
+    expect(() => selection.authority.preflight('local-upstream', [])).toThrowError(
+      new McpIdentityProfilePreflightError('required_tool_missing'),
+    );
+    expect(() => selection.authority.preflight('local-upstream', [
+      { name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL, inputSchema: reviewedSchema },
+      { name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL, inputSchema: reviewedSchema },
+    ])).toThrow(/required_tool_duplicated/);
+    expect(() => selection.authority.preflight('local-upstream', [{
+      name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL,
+      inputSchema: { ...reviewedSchema, additionalProperties: true },
+    }])).toThrow(/input_schema_mismatch/);
+    expect(() => selection.authority.preflight('local-upstream', [{
+      name: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_TOOL,
+      inputSchema: { ...reviewedSchema, description: 'x'.repeat(70_000) },
+    }])).toThrow(/projection_failed/);
+  });
+
+  it('does not echo an unknown selector value', () => {
+    let message = '';
+    try {
+      selectBuiltInMcpIdentityProfile('unknown.private-profile-value');
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toBe('Unknown or invalid MCP identity profile');
+    expect(message).not.toContain('private-profile-value');
   });
 });
 

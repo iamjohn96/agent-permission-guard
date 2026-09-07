@@ -1,7 +1,8 @@
 # Exact MCP Identity Architecture Check
 
 Status: accepted by Jonny on 2026-09-07. Shared identity machinery and synthetic network-free profiles
-are implemented locally; no production MCP profile or production policy-semantic change is included.
+were committed and pushed at `f9da468`; no production MCP profile or production policy-semantic change
+is included.
 
 Date: 2026-09-07
 

@@ -8,6 +8,8 @@ import { Client, type CallToolResult } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
+import { FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID } from '../../src/identity/builtin-profiles.js';
+
 type ClientMode = 'legacy' | 'auto';
 
 const openClients: Client[] = [];
@@ -18,6 +20,7 @@ const auditFailureGateway = resolve('dist/test/fixtures/audit-failure-gateway.js
 const allowPolicy = resolve('test/fixtures/allow-all-policy.yaml');
 const askPolicy = resolve('test/fixtures/ask-policy.yaml');
 const denyPolicy = resolve('test/fixtures/deny-policy.yaml');
+const denyListAllowedPolicy = resolve('test/fixtures/deny-list-allowed-policy.yaml');
 const riskEscalationPolicy = resolve('test/fixtures/risk-escalation-policy.yaml');
 const testDirectory = mkdtempSync(join(tmpdir(), 'apg-integration-'));
 
@@ -41,7 +44,67 @@ describe.each<ClientMode>(['legacy', 'auto'])('stdio proxy with %s client', (mod
       'wait_for_cancel',
       'get_started_wait_count',
       'get_cancelled_wait_count',
+      'list_allowed_directories',
+      'get_list_allowed_directories_call_count',
     ]);
+  });
+
+  it('activates the exact Filesystem profile only when explicitly selected', async () => {
+    const client = await connectGateway(
+      gatewayCli,
+      mode,
+      allowPolicy,
+      undefined,
+      FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
+    );
+    const result = await client.callTool({ name: 'list_allowed_directories', arguments: {} });
+    const count = await client.callTool({
+      name: 'get_list_allowed_directories_call_count',
+      arguments: {},
+    });
+    const other = await client.callTool({ name: 'echo', arguments: { message: 'still-structural' } });
+
+    expect(textOf(result)).toBe('/private/synthetic/allowed-root');
+    expect(textOf(count)).toBe('1');
+    expect(textOf(other)).toBe('still-structural');
+  });
+
+  it('blocks profile argument drift before the upstream tool call', async () => {
+    const client = await connectGateway(
+      gatewayCli,
+      mode,
+      allowPolicy,
+      undefined,
+      FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
+    );
+    const blocked = await client.callTool({
+      name: 'list_allowed_directories',
+      arguments: { path: '/private/must-not-forward' },
+    });
+    const count = await client.callTool({
+      name: 'get_list_allowed_directories_call_count',
+      arguments: {},
+    });
+
+    expect(blocked.isError).toBe(true);
+    expect(textOf(blocked)).toContain('required reviewed identity profile');
+    expect(textOf(blocked)).toContain('No upstream tool call was made');
+    expect(textOf(blocked)).not.toContain('/private/must-not-forward');
+    expect(textOf(count)).toBe('0');
+  });
+
+  it('does not let exact identity lower a Deny policy decision', async () => {
+    const client = await connectGateway(
+      gatewayCli,
+      mode,
+      denyListAllowedPolicy,
+      undefined,
+      FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
+    );
+    const denied = await client.callTool({ name: 'list_allowed_directories', arguments: {} });
+
+    expect(denied.isError).toBe(true);
+    expect(textOf(denied)).toContain('denied this tool call');
   });
 
   it('forwards an allowed tools/call result', async () => {
@@ -271,6 +334,7 @@ async function connectGateway(
   mode: ClientMode,
   policyPath: string = allowPolicy,
   dashboardStatePath?: string,
+  identityProfileId?: string,
 ): Promise<Client> {
   const client = new Client(
     { name: `apg-test-${mode}`, version: '0.1.0' },
@@ -284,6 +348,9 @@ async function connectGateway(
   ];
   if (dashboardStatePath !== undefined) {
     args.push('--dashboard-state', dashboardStatePath);
+  }
+  if (identityProfileId !== undefined) {
+    args.push('--identity-profile', identityProfileId);
   }
   args.push('--', process.execPath, fixtureServer);
 

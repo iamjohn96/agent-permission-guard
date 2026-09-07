@@ -9,7 +9,8 @@ import { collectDoctorChecks, parseDoctorArguments } from '../../src/cli/doctor.
 import { parseInitArguments, runInit } from '../../src/cli/init.js';
 import { parseInspectArguments, runInspect } from '../../src/cli/inspect.js';
 import { parseInstallArguments, runInstall } from '../../src/cli/install.js';
-import { isEntryPointPath, parseProxyArguments } from '../../src/cli/main.js';
+import { isEntryPointPath, main, parseProxyArguments } from '../../src/cli/main.js';
+import { FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID } from '../../src/identity/builtin-profiles.js';
 import { LocalInstallExecutionPlanner } from '../../src/install/execution-plan.js';
 import type { NpmRegistryTransport, RegistryResponse } from '../../src/install/npm-registry.js';
 import type {
@@ -112,21 +113,44 @@ describe('apg doctor', () => {
 });
 
 describe('apg proxy arguments', () => {
-  it('parses an opt-in dashboard state path', () => {
+  it('parses opt-in dashboard state and identity profile settings', () => {
     expect(parseProxyArguments([
       'proxy',
       '--policy', '.apg/policy.yaml',
       '--audit-db', '.apg/audit.sqlite',
       '--dashboard-state', '.apg/dashboard.json',
+      '--identity-profile', FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
       '--', 'node', 'server.js',
     ])).toEqual({
       policyPath: '.apg/policy.yaml',
       auditDbPath: '.apg/audit.sqlite',
       dashboardPort: 47_831,
       dashboardStatePath: '.apg/dashboard.json',
+      identityProfileId: FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID,
       command: 'node',
       args: ['server.js'],
     });
+  });
+
+  it('rejects an unknown identity profile before opening the database or starting upstream', async () => {
+    const directory = temporaryDirectory();
+    const policyPath = join(directory, 'policy.yaml');
+    const auditPath = join(directory, 'audit.sqlite');
+    const markerPath = join(directory, 'upstream-started');
+    const commandPath = join(directory, 'marker-command');
+    writeFileSync(policyPath, 'version: 1\nrules: []\n', { mode: 0o600 });
+    writeFileSync(commandPath, `#!/bin/sh\ntouch ${markerPath}\n`, { mode: 0o700 });
+    chmodSync(commandPath, 0o700);
+
+    await expect(main([
+      'proxy',
+      '--policy', policyPath,
+      '--audit-db', auditPath,
+      '--identity-profile', 'unknown.private-profile-value',
+      '--', commandPath,
+    ])).rejects.toThrow('Unknown or invalid MCP identity profile');
+    expect(() => readFileSync(auditPath)).toThrow();
+    expect(() => readFileSync(markerPath)).toThrow();
   });
 });
 

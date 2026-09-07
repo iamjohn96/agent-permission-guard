@@ -11,6 +11,9 @@ const MAX_PROFILES = 100;
 const MAX_FIELDS = 64;
 const MAX_STRING_LENGTH = 512;
 const MAX_LIST_ITEMS = 100;
+const MAX_INPUT_SCHEMA_BYTES = 65_536;
+const MAX_INPUT_SCHEMA_DEPTH = 32;
+const MAX_INPUT_SCHEMA_NODES = 10_000;
 
 export type SafeIdentityScalar =
   | Readonly<{ type: 'string'; value: string }>
@@ -74,6 +77,14 @@ export type PreparedMcpIdentity = Readonly<{
 
 export class ExactMcpIdentityRequiredError extends Error {
   override readonly name = 'ExactMcpIdentityRequiredError';
+}
+
+export class McpIdentityProfilePreflightError extends Error {
+  override readonly name = 'McpIdentityProfilePreflightError';
+
+  constructor(readonly code: string) {
+    super(`MCP identity profile preflight failed: ${code}`);
+  }
 }
 
 const trustedFields = new WeakSet<object>();
@@ -184,7 +195,10 @@ export function defineMcpIdentityProfile(input: Readonly<{
     throw new Error('Identity profile version is invalid');
   }
   const entries = Object.entries(input.fields).sort(([left], [right]) => compareText(left, right));
-  if (entries.length === 0 || entries.length > MAX_FIELDS) throw new Error('Identity profile field count is invalid');
+  if (entries.length > MAX_FIELDS) throw new Error('Identity profile field count is invalid');
+  if (entries.length === 0 && input.parameterCoverage !== 'complete_action_parameters') {
+    throw new Error('Only complete identity profiles may have zero fields');
+  }
   for (const [name, definition] of entries) {
     assertIdentifier(name);
     if (FORBIDDEN_FIELD.test(name)) throw new Error('Identity profile cannot disclose a credential-like field');
@@ -241,17 +255,38 @@ export function defineMcpIdentityProfile(input: Readonly<{
 
 export class McpIdentityAuthority {
   private readonly profiles: ReadonlyMap<string, McpIdentityProfile>;
+  private readonly exactRequiredKeys: ReadonlySet<string>;
 
-  constructor(profiles: readonly McpIdentityProfile[] = []) {
+  constructor(
+    profiles: readonly McpIdentityProfile[] = [],
+    options: Readonly<{ exactRequiredProfileIds?: readonly string[] }> = {},
+  ) {
     if (profiles.length > MAX_PROFILES) throw new Error('Too many MCP identity profiles');
     const registry = new Map<string, McpIdentityProfile>();
+    const profilesById = new Map<string, McpIdentityProfile>();
     for (const profile of profiles) {
       if (!trustedProfiles.has(profile)) throw new Error('Untrusted MCP identity profile');
       const key = profileKey(profile.serverId, profile.toolName);
       if (registry.has(key)) throw new Error('Duplicate MCP identity profile assignment');
+      if (profilesById.has(profile.id)) throw new Error('Duplicate MCP identity profile ID');
       registry.set(key, profile);
+      profilesById.set(profile.id, profile);
     }
     this.profiles = registry;
+
+    const requiredIds = options.exactRequiredProfileIds ?? [];
+    if (requiredIds.length > MAX_PROFILES || new Set(requiredIds).size !== requiredIds.length) {
+      throw new Error('Exact-required MCP identity profile IDs are invalid');
+    }
+    const requiredKeys = new Set<string>();
+    for (const id of requiredIds) {
+      const profile = profilesById.get(id);
+      if (profile === undefined || profile.parameterCoverage !== 'complete_action_parameters') {
+        throw new Error('Exact-required MCP identity profile is unavailable or incomplete');
+      }
+      requiredKeys.add(profileKey(profile.serverId, profile.toolName));
+    }
+    this.exactRequiredKeys = requiredKeys;
   }
 
   prepare(
@@ -270,6 +305,31 @@ export class McpIdentityAuthority {
     }
     return Object.freeze({ result, dispatchParams });
   }
+
+  isExactRequired(serverId: string, toolName: string): boolean {
+    return this.exactRequiredKeys.has(profileKey(serverId, toolName));
+  }
+
+  preflight(serverId: string, tools: readonly Tool[]): void {
+    for (const [key, profile] of this.profiles) {
+      if (profile.serverId !== serverId || !this.exactRequiredKeys.has(key)) continue;
+      const matches = tools.filter((tool) => tool.name === profile.toolName);
+      if (matches.length === 0) throw new McpIdentityProfilePreflightError('required_tool_missing');
+      if (matches.length !== 1) throw new McpIdentityProfilePreflightError('required_tool_duplicated');
+      const tool = matches[0];
+      if (tool === undefined) throw new McpIdentityProfilePreflightError('required_tool_missing');
+      const result = this.prepare(
+        serverId,
+        { name: profile.toolName, arguments: {} },
+        tool.inputSchema,
+      ).result;
+      if (result.assurance !== 'adapter_action_exact') {
+        throw new McpIdentityProfilePreflightError(
+          result.approvalView.failureCode ?? 'exact_identity_unavailable',
+        );
+      }
+    }
+  }
 }
 
 export function isTrustedMcpIdentityResult(value: unknown): value is McpIdentityResult {
@@ -277,7 +337,53 @@ export function isTrustedMcpIdentityResult(value: unknown): value is McpIdentity
 }
 
 export function observedInputSchemaDigest(inputSchema: Tool['inputSchema']): string {
+  assertBoundedInputSchema(inputSchema);
+  const canonicalSchema = canonicalReceiptJson(inputSchema);
+  if (Buffer.byteLength(canonicalSchema, 'utf8') > MAX_INPUT_SCHEMA_BYTES) {
+    throw new Error('MCP input schema exceeds the identity resource limit');
+  }
   return digest({ format: 'apg-observed-mcp-input-schema-v1', inputSchema });
+}
+
+function assertBoundedInputSchema(inputSchema: Tool['inputSchema']): void {
+  const state = { bytes: 0, nodes: 0 };
+  const ancestors = new WeakSet<object>();
+  const visit = (value: unknown, depth: number) => {
+    state.nodes += 1;
+    if (state.nodes > MAX_INPUT_SCHEMA_NODES || depth > MAX_INPUT_SCHEMA_DEPTH) {
+      throw new Error('MCP input schema exceeds the identity resource limit');
+    }
+    if (typeof value === 'string') {
+      state.bytes += Buffer.byteLength(value, 'utf8');
+    } else if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+      state.bytes += 16;
+    } else if (Array.isArray(value)) {
+      if (ancestors.has(value)) throw new Error('MCP input schema must not be cyclic');
+      ancestors.add(value);
+      try {
+        for (const item of value) visit(item, depth + 1);
+      } finally {
+        ancestors.delete(value);
+      }
+    } else if (typeof value === 'object' && value !== null) {
+      if (ancestors.has(value)) throw new Error('MCP input schema must not be cyclic');
+      ancestors.add(value);
+      try {
+        for (const [key, nested] of Object.entries(value)) {
+          state.bytes += Buffer.byteLength(key, 'utf8');
+          visit(nested, depth + 1);
+        }
+      } finally {
+        ancestors.delete(value);
+      }
+    } else {
+      throw new Error('MCP input schema contains an unsupported value');
+    }
+    if (state.bytes > MAX_INPUT_SCHEMA_BYTES) {
+      throw new Error('MCP input schema exceeds the identity resource limit');
+    }
+  };
+  visit(inputSchema, 0);
 }
 
 function projectProfile(

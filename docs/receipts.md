@@ -60,9 +60,11 @@ receipts bind the exact approved execution plan by its existing plan hash and di
 package identity needed to understand the action.
 
 Generic MCP receipts currently use `structural_only` identity because APG cannot safely assume which
-arbitrary tool parameters contain secrets. APG now has common support for explicitly registered,
-versioned safe profiles, but ships no production MCP profile. Unknown and production tools therefore
-remain structural today.
+arbitrary tool parameters contain secrets. APG supports explicitly registered, versioned safe profiles
+and ships one opt-in zero-parameter profile for `list_allowed_directories`. It is selected explicitly with
+`--identity-profile filesystem.list-allowed-directories.v1`; unknown tools and every unselected profile
+remain structural. The profile does not authenticate the upstream command, package, or publisher, and
+its separately approval-gated pinned-package acceptance has not yet been run.
 
 A profile-bearing receipt uses schema 1.1 and declares one of these identities:
 

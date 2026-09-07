@@ -27,7 +27,20 @@ export async function createGateway(
   identityAuthority: McpIdentityAuthority = new McpIdentityAuthority(),
 ): Promise<GatewayServer> {
   const upstream = await connectStdioUpstream(upstreamConfig);
-  const listedTools = await upstream.client.listTools();
+  const listedTools = await (async () => {
+    try {
+      const result = await upstream.client.listTools();
+      identityAuthority.preflight(upstreamConfig.serverId, result.tools);
+      return result;
+    } catch (error) {
+      try {
+        await upstream.close();
+      } catch {
+        // Preserve the original startup/preflight failure.
+      }
+      throw error;
+    }
+  })();
   const toolsByName = new Map(listedTools.tools.map((tool) => [tool.name, tool]));
 
   const serverFactory: McpServerFactory = () => {
@@ -60,6 +73,15 @@ export async function createGateway(
           identityAuthority,
         );
         const context = prepared.context;
+        if (
+          identityAuthority.isExactRequired(context.serverId, context.toolName)
+          && context.identity?.assurance !== 'adapter_action_exact'
+        ) {
+          const failureCode = context.identity?.approvalView.failureCode;
+          const auditCall = audit.begin(context, exactIdentityRequiredDecision(failureCode));
+          auditCall.markBlocked('denied');
+          return projectResult(server, exactIdentityRequiredResult(), tool);
+        }
         const decision = await interceptor.evaluate(context);
         const auditCall = audit.begin(context, decision);
 
@@ -148,6 +170,32 @@ export async function createGateway(
     async close() {
       await upstream.close();
     },
+  };
+}
+
+function exactIdentityRequiredDecision(failureCode: string | undefined) {
+  return {
+    action: 'deny' as const,
+    reason: 'exact_identity_required',
+    evaluation: {
+      baseDecision: 'deny' as const,
+      effectiveDecision: 'deny' as const,
+      reasonCodes: [
+        'exact_identity_required',
+        ...(failureCode === undefined ? [] : [`identity_${failureCode}`]),
+      ],
+      risk: { score: 0, band: 'low' as const, signals: [] },
+    },
+  };
+}
+
+function exactIdentityRequiredResult(): CallToolResult {
+  return {
+    content: [{
+      type: 'text',
+      text: 'Agent Permission Guard blocked this tool call: the request did not match the required reviewed identity profile. No upstream tool call was made.',
+    }],
+    isError: true,
   };
 }
 

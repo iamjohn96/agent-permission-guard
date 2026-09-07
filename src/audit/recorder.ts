@@ -425,12 +425,11 @@ function normalizeEvaluation(decision: AuditDecision): NonNullable<AuditDecision
 }
 
 function summarizeResult(result: CallToolResult): unknown {
-  return redactForAudit({
+  return {
     isError: result.isError === true,
     contentTypes: result.content.map((item) => item.type),
     contentCount: result.content.length,
-    structuredContent: result.structuredContent,
-  });
+  };
 }
 
 function summarizeMcpReceiptResult(result: CallToolResult): ObservedReceiptResult {

@@ -1,0 +1,6 @@
+version: 1
+rules:
+  - id: deny-list-allowed-directories
+    priority: 100
+    match: { server: local-upstream, tools: [list_allowed_directories] }
+    decision: deny

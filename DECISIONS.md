@@ -141,6 +141,37 @@ account, target, or behavior may not qualify for portable exact identity.
 Revisit If: APG adds reviewed production profiles, principal identity, server executable provenance,
 user-defined profiles, or selective-disclosure commitments.
 
+## First production MCP profile is explicit, zero-parameter, and target-only fail-closed
+
+Date: 2026-09-07
+
+Context: The shared identity authority needed one narrow production integration before considering
+path-bearing, credential-bearing, or side-effecting MCP tools. The pinned Filesystem source defines
+`list_allowed_directories` without input parameters, but its result can expose private paths and its
+allowed-directory state can change through MCP Roots.
+
+Decision: Ship `filesystem.list-allowed-directories.v1` as an explicit `--identity-profile` selection.
+Validate the selector before database/upstream initialization, bind a bounded startup input-schema
+digest, require exact identity only for the covered tool, and block profile mismatch before policy or
+upstream dispatch. Do not lower Allow/Ask/Deny, auto-select from upstream metadata, alter other tools, or
+claim more than configured-label server provenance. Exclude returned paths and Roots state from request
+identity and portable result evidence. MCP audit summaries retain only bounded error/type/count metadata,
+not text or structured result bodies.
+
+Alternatives: Auto-detect the server from its tool/schema; begin with a path-bearing read; hash returned
+directories; add a server-ID policy change simultaneously.
+
+Reason: A zero-parameter request minimizes private identity material and exercises real profile
+selection, drift detection, approval, and receipt machinery without conflating request exactness with
+server authenticity or result identity.
+
+Trade-offs: A malicious same-shape server can still mimic the reviewed tool, schema drift causes an
+availability failure, and the result still reaches the requesting MCP client/model. The checked-in schema
+fixture remains runtime-unvalidated until a separately approved pinned-package acceptance is run.
+
+Revisit If: The pinned runtime advertises a different schema, executable provenance becomes available,
+APG handles dynamic tool-list changes, or a result-identity design can protect private paths.
+
 ## MCP profile evidence uses receipt schema 1.1 without a database migration
 
 Date: 2026-09-07

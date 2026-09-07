@@ -17,7 +17,10 @@ describe('SQLite audit recorder', () => {
 
     const call = recorder.begin(context, decision);
     call.markForwarding();
-    call.markCompleted({ content: [{ type: 'text', text: 'file contents are not retained' }] });
+    call.markCompleted({
+      content: [{ type: 'text', text: 'file contents are not retained' }],
+      structuredContent: { content: '/private/synthetic/allowed-root' },
+    });
 
     const row = database.prepare(`
       SELECT arguments_json, status, result_summary_json FROM tool_calls
@@ -26,6 +29,8 @@ describe('SQLite audit recorder', () => {
     expect(row.arguments_json).not.toContain('never-store-this');
     expect(row.status).toBe('completed');
     expect(row.result_summary_json).not.toContain('file contents are not retained');
+    expect(row.result_summary_json).not.toContain('/private/synthetic/allowed-root');
+    expect(row.result_summary_json).toContain('"contentCount":1');
     expect(recorder.verifyHashChain()).toBe(true);
 
     database.prepare("UPDATE audit_events SET event_json = '{\"tampered\":true}' WHERE sequence = 1").run();

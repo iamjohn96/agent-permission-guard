@@ -5,6 +5,7 @@ import { z } from 'zod';
 let dangerousCallCount = 0;
 let startedWaitCount = 0;
 let cancelledWaitCount = 0;
+let listAllowedDirectoriesCallCount = 0;
 
 serveStdio(() => {
   const server = new McpServer(
@@ -83,6 +84,30 @@ serveStdio(() => {
     },
     async () => ({
       content: [{ type: 'text', text: String(cancelledWaitCount) }],
+    }),
+  );
+
+  server.registerTool(
+    'list_allowed_directories',
+    {
+      description: 'Returns a synthetic private path for exact identity tests.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async () => {
+      listAllowedDirectoriesCallCount += 1;
+      return { content: [{ type: 'text', text: '/private/synthetic/allowed-root' }] };
+    },
+  );
+
+  server.registerTool(
+    'get_list_allowed_directories_call_count',
+    {
+      description: 'Returns the synthetic list_allowed_directories call count.',
+      inputSchema: z.object({}),
+    },
+    async () => ({
+      content: [{ type: 'text', text: String(listAllowedDirectoriesCallCount) }],
     }),
   );
 

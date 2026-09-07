@@ -80,6 +80,28 @@ node dist/src/cli/main.js proxy \
 
 APG prints a tokenized localhost dashboard URL to stderr. With the optional `--dashboard-state` setting, it also writes the URL, process ID, and start time to a private JSON file for MCP hosts that hide stderr. The file contains a bearer token: do not share or commit it. APG removes its own state file after a normal shutdown.
 
+The first opt-in Exact MCP Identity profile covers only the zero-argument Filesystem tool
+`list_allowed_directories`:
+
+```sh
+node dist/src/cli/main.js proxy \
+  --policy ./.apg/policy.yaml \
+  --audit-db ./.apg/audit.sqlite \
+  --identity-profile filesystem.list-allowed-directories.v1 \
+  -- <reviewed-filesystem-server-command> [args...]
+```
+
+Profile selection is explicit and does not verify that the command is the official server. APG reports
+server provenance as a configured label only. The profile requires the reviewed input schema and rejects
+all arguments or MCP request metadata before forwarding. It does not lower an existing policy decision,
+and other tools remain structural. The result can disclose current allowed directory paths to the MCP
+client; those paths are not added to portable receipt identity evidence. Direct MCP connections that do
+not pass through this proxy remain unprotected.
+
+The network-free fixture for this profile is implemented, but the separately approval-gated acceptance
+against `@modelcontextprotocol/server-filesystem@2026.7.10` has not yet been run. A schema mismatch fails
+closed rather than silently downgrading.
+
 ## Current milestone
 
 - Proxy `tools/list` from an upstream MCP server.
@@ -140,7 +162,7 @@ apg inspect <npm|npx> <package-spec> [--registry <https-url>]
 apg install <npm|npx> <package-spec> [supported package options] [--registry <https-url>] [--timeout-seconds <1..900>] [--approval-ttl-seconds <1..3600>]
 apg receipt export <action-id> [--audit-db <audit.sqlite>] --output <receipt.json>
 apg receipt verify <receipt.json>
-apg proxy --policy ./.apg/policy.yaml --audit-db ./.apg/audit.sqlite [--dashboard-state ./.apg/dashboard.json] -- <upstream-command> [args...]
+apg proxy --policy ./.apg/policy.yaml --audit-db ./.apg/audit.sqlite [--dashboard-state ./.apg/dashboard.json] [--identity-profile <profile-id>] -- <upstream-command> [args...]
 ```
 
 `apg init` defaults to `./.apg` and accepts `--directory <path>`. It creates `policy.yaml` with private file permissions and refuses to overwrite an existing policy. The audit database is created only when the proxy first starts.

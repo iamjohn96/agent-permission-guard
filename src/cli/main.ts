@@ -11,6 +11,7 @@ import { startDashboard } from '../dashboard/server.js';
 import { type DashboardStateFile, writeDashboardStateFile } from '../dashboard/state-file.js';
 import { openAuditDatabase } from '../db/database.js';
 import { createGateway } from '../gateway/gateway.js';
+import { selectBuiltInMcpIdentityProfile } from '../identity/builtin-profiles.js';
 import { LivePolicyController } from '../policy/live-controller.js';
 import { serveStdioGateway } from '../transport/stdio-downstream.js';
 import { parseDoctorArguments, runDoctor } from './doctor.js';
@@ -24,6 +25,7 @@ export type ProxyArguments = Readonly<{
   auditDbPath: string;
   dashboardPort: number;
   dashboardStatePath?: string;
+  identityProfileId?: string;
   command: string;
   args: readonly string[];
 }>;
@@ -34,6 +36,7 @@ export function parseProxyArguments(argv: readonly string[]): ProxyArguments {
   let auditDbPath: string | undefined;
   let dashboardPort = 47_831;
   let dashboardStatePath: string | undefined;
+  let identityProfileId: string | undefined;
   let index = 1;
 
   while (index < argv.length && argv[index] !== '--') {
@@ -44,6 +47,7 @@ export function parseProxyArguments(argv: readonly string[]): ProxyArguments {
     else if (option === '--audit-db' && auditDbPath === undefined) auditDbPath = value;
     else if (option === '--dashboard-port') dashboardPort = parsePort(value);
     else if (option === '--dashboard-state' && dashboardStatePath === undefined) dashboardStatePath = value;
+    else if (option === '--identity-profile' && identityProfileId === undefined) identityProfileId = value;
     else throw usageError();
     index += 2;
   }
@@ -52,8 +56,15 @@ export function parseProxyArguments(argv: readonly string[]): ProxyArguments {
     throw usageError();
   }
 
-  const base = { policyPath, auditDbPath, dashboardPort, command, args: argv.slice(index + 2) };
-  return dashboardStatePath === undefined ? base : { ...base, dashboardStatePath };
+  return {
+    policyPath,
+    auditDbPath,
+    dashboardPort,
+    ...(dashboardStatePath === undefined ? {} : { dashboardStatePath }),
+    ...(identityProfileId === undefined ? {} : { identityProfileId }),
+    command,
+    args: argv.slice(index + 2),
+  };
 }
 
 function parsePort(value: string): number {
@@ -63,7 +74,7 @@ function parsePort(value: string): number {
 }
 
 function usageError(): Error {
-  return new Error('Usage: apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] -- <upstream-command> [args...]');
+  return new Error('Usage: apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] [--identity-profile <profile-id>] -- <upstream-command> [args...]');
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -96,6 +107,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
 
   const parsed = parseProxyArguments(argv);
+  const identitySelection = parsed.identityProfileId === undefined
+    ? undefined
+    : selectBuiltInMcpIdentityProfile(parsed.identityProfileId);
   const policies = new LivePolicyController(parsed.policyPath);
   const database = openAuditDatabase(parsed.auditDbPath);
   const audit = new SqliteAuditRecorder(database);
@@ -117,6 +131,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
         coordinator: approvals,
         getTtlMs: () => policies.getApprovalTtlMs(),
       },
+      identitySelection?.authority,
     );
   } catch (error) {
     approvals.close();
@@ -139,6 +154,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     await gateway.close();
     database.close();
     throw error;
+  }
+  if (identitySelection !== undefined) {
+    process.stderr.write(
+      `[apg] identity profile: ${identitySelection.profileId} (required for ${identitySelection.toolName})\n`,
+    );
+    process.stderr.write('[apg] server provenance: configured label only; downstream results and effects are not verified\n');
   }
   process.stderr.write(`[apg] approval dashboard: ${dashboard.url}\n`);
 
@@ -194,7 +215,7 @@ function generalUsage(): string {
     '  apg install <npm|npx> <package-spec> [supported package options] [--registry <https-url>] [--timeout-seconds <1..900>] [--approval-ttl-seconds <1..3600>] [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>]',
     '  apg receipt export <action-id> [--audit-db <audit.sqlite>] --output <receipt.json>',
     '  apg receipt verify <receipt.json>',
-    '  apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] -- <upstream-command> [args...]',
+    '  apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] [--identity-profile <profile-id>] -- <upstream-command> [args...]',
   ].join('\n');
 }
 
