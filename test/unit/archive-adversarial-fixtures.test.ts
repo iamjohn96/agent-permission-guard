@@ -150,15 +150,15 @@ describe('library-independent archive adversarial fixtures', () => {
     }
   });
 
-  it('imports neither archive candidate and leaves dependency manifests unchanged', () => {
+  it('keeps fixture construction independent from the exact selected archive candidate', () => {
     const fixtureSource = readFileSync('test/fixtures/archive-adversarial-fixtures.ts', 'utf8');
     const packageJson = readFileSync('package.json', 'utf8');
     const packageLock = readFileSync('package-lock.json', 'utf8');
 
     expect(fixtureSource).not.toMatch(/from ['"](?:tar|tar-stream)(?:\/[^'"]*)?['"]/u);
-    expect(JSON.parse(packageJson).dependencies).not.toHaveProperty('tar');
+    expect(JSON.parse(packageJson).dependencies.tar).toBe('7.5.22');
     expect(JSON.parse(packageJson).dependencies).not.toHaveProperty('tar-stream');
-    expect(JSON.parse(packageLock).packages[''].dependencies).not.toHaveProperty('tar');
+    expect(JSON.parse(packageLock).packages[''].dependencies.tar).toBe('7.5.22');
     expect(JSON.parse(packageLock).packages[''].dependencies).not.toHaveProperty('tar-stream');
   });
 });

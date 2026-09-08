@@ -1,8 +1,10 @@
 # Archive Adapter Dependency Security Check
 
 Status: accepted by Jonny on 2026-09-07. The approved library-independent fixture foundation is
-implemented locally and remains uncommitted. This acceptance does not approve a parser dependency,
-registry request, real archive handling, stage write, package startup, commit, or push.
+implemented, committed, and pushed at `e747325`. The separately approved exact artifact/lock review and
+candidate-backed synthetic checkpoint are recorded in
+`docs/exact-archive-parser-artifact-lock-review.md`. Exact `tar@7.5.22` is now present, but real package
+archive handling, stage writes, package startup, commit, and push remain unapproved.
 
 This check authorizes no dependency change, registry request, package download, real archive parse or
 extraction, persistent stage write, package startup, database migration, publish, or push. Candidate
@@ -320,7 +322,17 @@ The accepted network-free foundation now provides:
 - an invariant test that neither archive candidate appears in the fixture source or dependency files.
 
 The fixture builder creates bytes only in memory and imports no archive parser. No fixture is a real npm
-package archive, no package code runs, and no filesystem materializer exists.
+package archive and no package code runs. The separately accepted synthetic materializer writes only
+these fixture bodies beneath test-owned disposable private directories.
 
-The next checkpoint is an exact registry artifact and APG lock-graph review for the preferred
-`tar/parse` candidate. It remains separately approval-gated and may not silently add the dependency.
+The exact registry artifact and APG lock-graph review conditionally accepts exact `tar@7.5.22` for a
+separately approved, network-free parser fixture checkpoint. That checkpoint is now implemented: all 52
+independent fixtures are evaluated through an APG-owned strict gzip/USTAR envelope and the exact
+`tar/parse` candidate, while the original fixture builder remains library-independent. It does not
+broaden the real-archive boundary.
+
+The accepted bounded-worker checkpoint now moves both parser passes into fresh permission-gated child
+processes and keeps every stage write in the APG parent. It authenticates the complete pass-A transcript,
+compares pass-B chunks, verifies the final tree, and requires exclusive seal plus ordered synthetic audit
+evidence. This is fault/resource containment, not an OS sandbox, and it remains unconnected to real
+package artifacts or production staging.

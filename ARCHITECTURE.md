@@ -99,11 +99,49 @@ Inspection and materialization are separate passes over a revalidated artifact a
 authenticated ordered transcript including body hashes. APG alone will own future exclusive no-follow
 filesystem writes, and no scratch output becomes runnable before complete validation and sealing.
 
-The current archive fixture checkpoint remains parser-free. A test-only deterministic USTAR/gzip byte
-builder produces valid controls, gzip/tar ambiguity and corruption, PAX/GNU parser-smuggling cases,
-semantic path/type/resource attacks, and equal-length cross-pass substitutions. It imports no candidate
-archive library and performs no real package extraction. See
+The archive fixture builder remains parser-free. It produces deterministic USTAR/gzip bytes for valid
+controls, gzip/tar ambiguity and corruption, PAX/GNU parser-smuggling cases, semantic path/type/resource
+attacks, and equal-length cross-pass substitutions. A separate production module imports only
+`tar/parse`: APG validates a strict single-member gzip and USTAR envelope first, then requires the
+candidate's ordered header/body interpretation to match before portable policy validation can issue an
+authenticated frozen transcript. Neither module performs extraction or filesystem writes. See
 `docs/archive-adapter-dependency-security-check.md`.
+
+The exact artifact/lock review accepts only `tar@7.5.22` and its reviewed six-node public production
+graph for the implemented network-free synthetic checkpoint. APG declares the direct version exactly,
+preserves every reviewed resolved URL and SHA-512, disables scripts, imports only `tar/parse`, and tests
+the lock contract. Registry integrity is artifact-selection evidence, not publisher provenance or a
+safety claim. See
+`docs/exact-archive-parser-artifact-lock-review.md`.
+
+The candidate adapter currently accepts in-memory bytes and uses synchronous bounded decompression and
+parsing. It checks cancellation only around those phases, so it cannot yet guarantee prompt interruption
+of hostile CPU work. Real artifact use remains blocked on a separately accepted worker/streaming limit,
+two-pass descriptor revalidation, APG-owned materialization, and Node 24-26 compatibility architecture.
+
+The accepted bounded-worker foundation runs each archive pass in a fresh shell-free child process and
+keeps all filesystem writes in the APG parent. Pass A emits a complete write-free authenticated
+transcript; pass B streams bounded body chunks whose order, metadata, length, and hashes must match that
+transcript before and during exclusive no-follow writes beneath a private random pending root. Complete
+tree revalidation, durable audit ordering, and an exclusive authenticated seal are all required before
+a stage can become launchable.
+
+The child-process boundary limits failure propagation but is not a sandbox. Node's Permission Model is
+not a malicious-code security boundary, and Node 24 cannot restrict network access through that model.
+Accordingly, a real archive worker must capability-gate no-network assurance: Node 25/26 can run with no
+network grant, while Node 24 requires a separately reviewed OS containment provider or fails closed for
+real artifacts. Standard Node filesystem APIs also cannot eliminate same-user intermediate-path races;
+the POSIX-only v0 writer mitigates them with private ownership, random roots, no-follow exclusive leaf
+opens, continuous identity checks, and never publishing unsealed paths. See
+`docs/bounded-archive-worker-two-pass-materialization-architecture-check.md`.
+
+The network-free implementation binds a hashed allowlist of runtime files, starts Node with an empty
+environment and no shell, uses stdin for the bounded request/artifact/acknowledgement stream, and accepts
+only length-prefixed closed-schema stdout frames. The parent reconstructs and authenticates pass-A
+evidence, compares every pass-B body chunk, owns all POSIX file handles, revalidates the complete tree,
+and publishes a read-only seal before the final synthetic audit transition. The local fixture matrix is
+validated on Node 26; Node 24/25 runtime behavior remains a release gate and no real artifact path is
+connected.
 
 ### Install Guard
 

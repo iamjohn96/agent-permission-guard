@@ -1,5 +1,70 @@
 # Architecture Decisions
 
+## Archive parsing uses fresh child processes and APG-owned two-pass materialization
+
+Date: 2026-09-07
+
+Status: accepted on 2026-09-07. The approved network-free synthetic foundation is implemented locally;
+real artifact and production integration remain separate approval boundaries.
+
+Context: The exact candidate adapter is currently synchronous and in-process. Real untrusted archives
+need interruptible failure containment, exact artifact/runtime identity across two passes, a filesystem
+boundary outside the parser library, and a durable definition of when materialized bytes become
+launchable.
+
+Decision: Run pass A and pass B in separate fresh shell-free child processes with closed bounded
+protocols, while the APG parent retains artifact descriptors, authenticates the pass-A transcript, and
+owns every pass-B filesystem write. Materialize only beneath a private random POSIX pending root using
+exclusive no-follow leaf opens, independently verify all body hashes and the complete tree, then require
+durable audit ordering plus an exclusive authenticated seal before `READY`. Treat Node's Permission
+Model as defense in depth, not a sandbox. Fail the real-worker capability gate on Node 24 unless a
+separately reviewed OS provider supplies no-network containment.
+
+Alternatives: Keep parsing in-process; use worker threads; let node-tar extract; write after one pass;
+rename a directory as the sole readiness signal; silently run Node 24 without network denial.
+
+Reason: A child contains parser crashes and permits parent-owned deadlines better than a worker thread,
+while two complete matching passes keep third-party parsing and APG filesystem mutation separate. A
+sealed-and-audited readiness condition prevents partial or late-failing output from becoming runnable.
+
+Trade-offs: This is POSIX-only, rejects real archive work on an uncontained Node 24 host, and still does
+not defeat root or a malicious same-user actor. Child IPC and a second full parse add complexity and
+cost. USTAR-only support may reject legitimate packages, and power-loss/cleanup behavior remains
+filesystem-dependent.
+
+Revisit If: Node 24 support is dropped; a reviewed OS sandbox/native descriptor-relative writer is
+added; the worker is reproducibly bundled; the selected filesystem lacks the required durability
+semantics; or an exact production package requires a broader archive grammar.
+
+## Exact tar artifact and six-node lock graph are conditionally accepted
+
+Date: 2026-09-07
+
+Context: The parser-only architecture required registry evidence for one exact artifact and the actual
+APG production lock impact before any dependency or candidate-backed fixture execution could be
+approved.
+
+Decision: Accept exact `tar@7.5.22` for the separately approved network-free synthetic fixture
+checkpoint. Its APG lock adds only `tar`, `@isaacs/fs-minipass`, `chownr`, `minipass`, `minizlib`, and
+`yallist`, all at reviewed exact versions, public HTTPS registry URLs, and SHA-512 values. The adapter
+imports only `tar/parse`; scripts remain disabled and every extraction, unpacking,
+member-selection, and library filesystem-writing API remains prohibited.
+
+Alternatives: Use a floating `tar` range; accept upstream repository metadata without an APG lock
+preview; use `tar-stream`; download the candidate artifact during this review.
+
+Reason: The isolated preview produced no unrelated lock churn, native/optional/prebuilt/install-script
+node, or known production advisory, while the public package exports a dedicated parser entry compatible
+with Node 24-26.
+
+Trade-offs: The package still exposes broad unused APIs and has a substantial security history. Public
+metadata and registry integrity do not prove publisher identity, reproducible build, or absence of a
+zero-day. Registry signatures were advertised but not verified. Only synthetic in-memory fixtures have
+run; synchronous decompression/parser work is not yet an interruptible real-artifact boundary.
+
+Revisit If: Any lock node, origin, integrity, script flag, license, engine, advisory, export, or fixture
+result changes; the Node 24-26 corpus differs; or a narrower maintained parser becomes demonstrably safer.
+
 ## Archive handling uses a parser-only candidate, a narrower grammar, and two matching passes
 
 Date: 2026-09-07

@@ -315,6 +315,16 @@ describe('materialized tree, state, and synthetic seal authority', () => {
     const ready = new PackageStageStateMachine('READY');
     expect(ready.transition('INVALID')).toBe('INVALID');
     expect(() => ready.transition('READY')).toThrowError(expect.objectContaining({ code: 'state_transition_invalid' }));
+
+    const archive = new PackageStageStateMachine('ARTIFACTS_VERIFIED');
+    expect(archive.transition('PASS_A_RUNNING')).toBe('PASS_A_RUNNING');
+    expect(archive.transition('ARCHIVES_PREFLIGHTED')).toBe('ARCHIVES_PREFLIGHTED');
+    expect(archive.transition('PASS_B_RUNNING')).toBe('PASS_B_RUNNING');
+    expect(archive.transition('MATERIALIZING')).toBe('MATERIALIZING');
+    expect(archive.transition('TREE_VERIFIED')).toBe('TREE_VERIFIED');
+    expect(archive.transition('READY_TO_COMMIT')).toBe('READY_TO_COMMIT');
+    expect(archive.transition('SEALED_PENDING_AUDIT')).toBe('SEALED_PENDING_AUDIT');
+    expect(archive.transition('READY')).toBe('READY');
   });
 
   it('requires matching authenticated audit evidence and rejects forged sealed stages', async () => {

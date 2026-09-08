@@ -2,16 +2,24 @@
 
 ## Current Milestone
 
-The Archive Adapter Dependency Security Check is accepted. Its library-independent adversarial fixture
-foundation is implemented and verified locally: deterministic test-only USTAR/gzip bytes, explicit
-expected transcripts, layered format/policy/limit failures, and equal-length cross-pass substitutions.
-No archive dependency has been added and no real package archive has been parsed or extracted.
+The accepted Bounded Archive Worker & Two-Pass Materialization Architecture is implemented locally as a
+network-free synthetic foundation. Each pass uses a fresh permission-gated child, the parent
+authenticates the write-free pass-A transcript and compares bounded pass-B chunks, and only the APG
+parent writes beneath a private POSIX pending root. Complete tree validation, exclusive seal publication,
+and the ordered synthetic audit transition are required for an authenticated `READY` result.
 
-The committed foundation accepts only owning-authority synthetic exact graph profiles, separates plan
+The exact `tar@7.5.22` dependency and candidate-backed network-free archive fixture foundation remain
+implemented locally and uncommitted. The reviewed six-node graph is exact, only `tar/parse` is imported,
+and all 52 library-independent fixtures pass through an APG-owned strict gzip/USTAR envelope plus
+candidate interpretation checks and the bounded child boundary. Synthetic temporary materialization has
+run; no real MCP package archive, registry access, production profile, persistent stage, receipt/database
+change, or startup path has run.
+
+The committed stage foundation accepts only owning-authority synthetic exact graph profiles, separates plan
 and one-time synthetic approval identities, validates injected bytes/archive descriptions and
-test-created trees, and exposes no public CLI path. Real registry access, package download, archive
-extraction, persistent staging, production profiles, receipt schema 1.2, and package startup remain
-separately gated.
+test-created trees, and exposes no public CLI path. Production registry access, target-package download,
+archive extraction, persistent staging, production profiles, receipt schema 1.2, and package startup
+remain separately gated.
 
 ## Completed
 
@@ -115,17 +123,49 @@ separately gated.
   - explicit ordered transcript expectations with body SHA-256
   - three equal-length cross-pass header/order/body substitutions
   - no archive candidate import, dependency change, filesystem materialization, or real package bytes
+- Exact Archive Parser Artifact & Lock Graph Review completed on 2026-09-07:
+  - exact candidate `tar@7.5.22` with public `tar/parse` export and reviewed registry SHA-512
+  - six-node added production graph, all public HTTPS registry artifacts with exact integrity values
+  - no optional/native/prebuilt/install-script lock nodes and no unrelated APG lockfile churn
+  - combined production audit reported zero known advisories at review time
+  - at review completion, dependency addition and parser execution remained a separate approval gate
+- Exact `tar@7.5.22` candidate-backed fixture foundation implemented locally:
+  - reviewed exact six-node production lock graph added with scripts disabled
+  - literal `tar/parse` is the only tar import; no filesystem/network/subprocess API in the adapter
+  - strict one-member gzip CRC/size/ratio gate and narrow USTAR checksum/type/end/padding gate
+  - node-tar ordered path/type/size/mode/body results must match the APG envelope interpretation
+  - frozen runtime-authenticated transcripts bind artifact SHA-512 and ordered body SHA-256 evidence
+  - complete transcript equality covers three same-length cross-pass substitutions
+  - no real MCP package archive, extraction, materialization, persistent stage, or startup
+- Bounded Archive Worker & Two-Pass Materialization Architecture Check accepted on 2026-09-07:
+  - fresh shell-free child process per pass, bounded closed-schema IPC, parent deadline/cancellation
+  - retained-descriptor artifact hashing and exact reopen identity across passes
+  - parent-authenticated write-free pass-A transcript and streaming pass-B equality
+  - APG-owned POSIX private-root materializer with exclusive no-follow leaf writes
+  - independent full-tree revalidation and seal-plus-durable-audit readiness
+  - explicit Node Permission Model non-sandbox language and Node 24 no-network capability gate
+  - synthetic isolated failure/crash/audit/cleanup test strategy with no real artifact or package code
+- Network-free Bounded Archive Worker & Synthetic Two-Pass POSIX Materializer implemented locally:
+  - fresh shell-free permission-gated child per pass with empty environment and private cwd
+  - exact hashed Node/worker/parser runtime manifest revalidated before both passes
+  - bounded request/artifact/ACK stdin and length-prefixed closed-schema stdout protocol
+  - timeout, cancellation, process-group termination, V8 limits, and bounded stderr/stdout
+  - parent-authenticated pass-A transcript and ordered pass-B metadata/body/hash equality
+  - exclusive no-follow parent writer, restrictive initial modes, sync, and complete tree verification
+  - exclusive read-only seal plus ordered synthetic audit with post-seal audit failure blocking `READY`
+  - monotonic pass/seal states, runtime drift rejection, quarantine without blind cleanup
+  - all 52 fixtures through child processes and isolated temporary materialization only
 
 ## In Progress
 
-- No production archive adapter, dependency selection, or real archive handling is in progress. The
-  local fixture checkpoint is ready for diff review and separate commit/push approval.
+- The combined exact parser and bounded worker/materializer checkpoint is complete locally and ready for
+  diff review plus separate commit/push approval. Real untrusted archive use remains separately blocked.
 
 ## Remaining
 
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
-- Separately approve archive dependency selection, production graph profile, registry confirmation,
-  artifact download/stage creation, receipt 1.2, and package startup.
+- Separately approve a production graph profile, registry confirmation, target artifact download/stage
+  creation, receipt 1.2, and package startup.
 - Review every later production MCP profile separately before it can emit exact assurance.
 - Select signing and trust architecture only after receipt semantics, verifier behavior, and identity
   assurance are accepted.
@@ -162,6 +202,10 @@ separately gated.
   exclusive-writer/session-ownership mechanism exists.
 - Archive handling must use the exact reviewed parser-only import, reject extension metadata in v0, and
   match a complete write-free transcript before APG-owned materialization can be sealed.
+- Archive worker isolation is capability-gated rather than described as a sandbox. Real artifact work
+  on Node 24 fails closed unless a separately reviewed OS provider supplies no-network containment.
+- A materialized path is not launchable by presence alone. The exact tree, authenticated seal, and
+  durable terminal `READY` audit state must all validate.
 
 ## Known Issues
 
@@ -186,12 +230,17 @@ separately gated.
   cover interpreter-selected scripts, imported modules, dynamic libraries, child processes, packages,
   publishers, dependency graphs, or runtime attestation.
 - Verified MCP package staging is foundation-only. The current synthetic authorities and injected
-  adapters are not connected to the CLI, Dashboard, durable audit DB, registry, archive extraction,
-  persistence, or launch. No archive library, production graph profile, receipt 1.2 evidence, or staged
-  launch exists yet.
-- The preferred archive parser remains an unapproved third-party candidate. Its exact registry artifact,
-  integrity, APG lock graph, licenses, supported-Node behavior, and candidate-backed fixture results have
-  not been verified. Current fixtures validate bytes and synthetic policy only, not a real parser.
+  adapters are not connected to the CLI, Dashboard, durable audit DB, production registry path, archive
+  extraction, persistence, or launch. The selected parser library is exercised only by synthetic
+  fixtures; no production graph profile, receipt 1.2 evidence, or staged launch exists yet.
+- Exact `tar@7.5.22` and its six-node graph are present, but only synthetic in-memory fixtures have run.
+  Registry signatures remain unverified. Synchronous parser CPU now runs inside a bounded child for the
+  new path, but Node 24/25 cross-version behavior is not yet evidenced and the child boundary is not an
+  OS sandbox. It is not approved for a real untrusted package artifact or persistent materialization.
+- Node's Permission Model is defense in depth, not a malicious-code security boundary. Node 24 has no
+  network permission gate, and standard Node filesystem APIs cannot eliminate same-user
+  intermediate-component races. The proposed architecture therefore blocks unsupported real-worker
+  capability and never claims OS sandboxing or same-user containment.
 - The first profile identifies an exact zero-parameter adapter action, not the directories
   returned by the tool. The result can disclose private absolute paths to the MCP client/model.
 - The Filesystem server can replace allowed directories through MCP Roots. A request receipt cannot prove
@@ -204,10 +253,19 @@ separately gated.
 
 ## Tests
 
-- Current final network-free local suite with one worker: 195 passed, 3 skipped on 2026-09-07.
+- Current final network-free local suite with one worker: 212 passed, 3 skipped on 2026-09-07.
+- Bounded worker/materializer focused coverage: 12 passed. All 52 fixtures run through fresh child
+  processes; additional cases cover pass-B streaming, cross-pass substitution, authority forgery,
+  pre-cancel, runtime drift, unsafe cwd, timeout, malformed stdout, stderr overflow, private-root writes,
+  symlink preexistence, pending-root permission drift, intermediate-directory replacement, post-write
+  mutation, seal collision, and audit failures before and after seal.
+- Exact tar candidate focused coverage: 12 passed across 2 files. Candidate-specific tests cover two
+  accepted transcripts, all 50 negative fixtures, three cross-pass substitutions, authority forgery,
+  pre-abort/invalid limits, exact import restrictions, and exact six-node lock integrity.
 - Archive adversarial fixture coverage: 7 passed over 52 archive fixtures and 3 cross-pass substitutions,
   including deterministic USTAR/gzip generation, explicit transcript golden values, layered rejection,
-  existing portable-policy behavior, gzip multi-member ambiguity, and dependency/import absence.
+  existing portable-policy behavior, gzip multi-member ambiguity, fixture-source independence, and the
+  exact candidate pin.
 - STDIO/Dashboard integration focused retry: 28 passed. Default parallel full retries encountered
   pre-existing fixed-deadline timeouts under contention; the same final suite passed with
   `--maxWorkers=1`.
@@ -254,7 +312,8 @@ separately gated.
 
 ## Next Recommended Task
 
-Perform an Exact Archive Parser Artifact & Lock Graph Review for the preferred `tar/parse` candidate.
-This next checkpoint requires separate approval for anonymous public-registry metadata reads and an
-isolated credential-free lockfile-only preview. Do not add the dependency to APG, execute parser code,
-or parse/extract a real package archive until the exact resulting graph and command receive approval.
+Review and separately approve committing and pushing the combined exact `tar@7.5.22` parser plus bounded
+worker/materializer checkpoint. After that, perform an Exact Production Graph Profile & Read-only
+Artifact Acceptance Architecture Check. Do not access a live registry, download a real artifact, create
+a production profile or persistent stage, change receipts/database schema, or start package code until
+that later architecture and action receive separate approval.
