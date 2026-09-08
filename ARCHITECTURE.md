@@ -243,3 +243,28 @@ private dashboard.json
 The state document uses additive version-1 fields. `instance_id` is a random non-secret identity for one dashboard lifetime and is returned by authenticated health. PID and start time are diagnostic only. State replacement invalidates the complete prior connection generation, including in-flight responses and the old token.
 
 Native clients must not read SQLite directly, persist the bearer token, follow redirects, weaken Ask behavior while offline, or treat a custom HTTP header as process identity. A same-user malicious process remains outside the protection offered by private file permissions; stronger OS process identity is deferred to packaged-product hardening.
+
+## Exact Production Graph Read-only Acceptance Foundation
+
+Production graph identity is an evidence-promotion path, not a self-asserted manifest. An
+`ExactGraphCandidateV1` is compiled from a closed npm lockfile-v3 shape and binds exact install layout,
+Node ancestor-resolution edges, public registry tarball URLs, SHA-512 values, runtime/compiler identity,
+worker protocol, and resource ceilings. Candidate ownership is separate from accepted-profile ownership;
+a correct candidate digest alone cannot create production authority.
+
+The accepted network-free foundation adds separate metadata, plan, artifact-file, acceptance, and review
+authorities. Fake transports confirm a complete exact metadata set under byte, deadline, redirect, origin,
+URL, and freshness limits. A one-time plan binds the complete ordered artifact set, runtime, worker
+protocol, resource limits, private root, and explicit read-only-inspection consequence. Fixture bytes are
+streamed into exclusive owner-only files and SHA-512 verified before descriptor-backed parser access.
+
+Archive worker protocol version 2 adds `pass_a_manifest`, which streams only the exact bounded
+`package.json` body after the complete authenticated transcript. The acceptance authority requires two
+fresh independently reopened Pass-A workers, transcript equality, a bounded duplicate-key-rejecting
+manifest projection, exact cleanup, and complete synthetic evidence before a test-only human-review
+stand-in can authenticate a profile. This workflow never grants Pass B.
+
+No production HTTPS adapter, built-in Filesystem graph, CLI, durable audit schema, materialized tree,
+stage, or package process is connected. Real graph genesis, metadata confirmation, artifact download,
+production registration, materialization, startup, and MCP actions remain independent approval boundaries.
+See `docs/exact-production-graph-profile-read-only-artifact-acceptance-architecture-check.md`.

@@ -318,3 +318,31 @@ compatibility union.
 
 Revisit If: Future evidence cannot fit additive receipt-finalization events or changes the meaning of an
 existing required field.
+
+## Production graph authority requires complete read-only artifact acceptance
+
+Date: 2026-09-08
+
+Context: A lockfile and self-consistent profile digest can describe exact package bytes and layout, but
+cannot prove that every artifact is served as declared, accepted by the bounded parser, or semantically
+consistent with its package manifest. Direct promotion would overstate assurance.
+
+Decision: Keep an untrusted exact graph candidate distinct from an accepted production profile. Limit the
+first target to `@modelcontextprotocol/server-filesystem@2026.7.10` on darwin-arm64/Node 26. Before
+repository registration, require complete fresh exact metadata, a one-time full-artifact plan, SHA-512
+verification into private disposable files, two independently reopened write-free Pass-A workers, bounded
+package-manifest projection, complete exact cleanup, and human review. Every later real network,
+registration, materialization, startup, and MCP-action boundary retains separate authority.
+
+Alternatives: Trust the lockfile and metadata; accept only the top artifact; materialize during acceptance;
+reuse npm's cache; automatically promote a successful runtime report.
+
+Reason: Separate authorities prevent a valid digest, partial graph success, or unclean temporary run from
+becoming production identity while retaining a software-only evidence path that never executes package code.
+
+Trade-offs: The first profile is platform-specific and conservative, rejects unsupported lock semantics,
+adds two parser processes per unique artifact, and still does not prove publisher identity, source/build
+equivalence, maliciousness, sandboxing, or runtime safety.
+
+Revisit If: A second runtime/platform profile is proposed, resumable acceptance is needed, provenance or
+signing evidence is added, or persistent materialization/startup becomes eligible for separate review.

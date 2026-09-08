@@ -1,11 +1,12 @@
 import type { PackageStageLimits } from './types.js';
 
-export const ARCHIVE_WORKER_PROTOCOL_VERSION = 1 as const;
+export const ARCHIVE_WORKER_PROTOCOL_VERSION = 2 as const;
 export const ARCHIVE_WORKER_ACK = 0x06;
 export const ARCHIVE_WORKER_MAX_BODY_CHUNK_BYTES = 64 * 1024;
+export const ARCHIVE_WORKER_MAX_PACKAGE_MANIFEST_BYTES = 1024 * 1024;
 export const ARCHIVE_WORKER_MAX_REQUEST_BYTES = 32 * 1024;
 
-export type ArchiveWorkerPass = 'pass_a' | 'pass_b';
+export type ArchiveWorkerPass = 'pass_a' | 'pass_a_manifest' | 'pass_b';
 
 export type ArchiveWorkerRequest = Readonly<{
   protocolVersion: typeof ARCHIVE_WORKER_PROTOCOL_VERSION;

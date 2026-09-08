@@ -46,7 +46,17 @@ export type PackageStageErrorCode =
   | 'tree_changed'
   | 'state_transition_invalid'
   | 'stage_not_authenticated'
-  | 'stage_audit_incomplete';
+  | 'stage_audit_incomplete'
+  | 'graph_lock_invalid'
+  | 'graph_metadata_invalid'
+  | 'graph_metadata_incomplete'
+  | 'metadata_expired'
+  | 'artifact_plan_invalid'
+  | 'artifact_file_invalid'
+  | 'artifact_cleanup_incomplete'
+  | 'manifest_invalid'
+  | 'manifest_mismatch'
+  | 'acceptance_incomplete';
 
 export class PackageStageError extends Error {
   readonly code: PackageStageErrorCode;

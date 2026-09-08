@@ -9,6 +9,7 @@ import { canonicalJson } from '../audit/canonical-json.js';
 import {
   ARCHIVE_WORKER_ACK,
   ARCHIVE_WORKER_MAX_BODY_CHUNK_BYTES,
+  ARCHIVE_WORKER_MAX_PACKAGE_MANIFEST_BYTES,
   ARCHIVE_WORKER_PROTOCOL_VERSION,
   encodeArchiveWorkerRequestHeader,
   type ArchiveWorkerCapabilities,
@@ -81,6 +82,17 @@ export type AuthenticatedArchiveWorkerTranscript = Readonly<{
   transcript: TarArchiveTranscript;
 }>;
 
+export type AuthenticatedArchiveWorkerManifestInspection = AuthenticatedArchiveWorkerTranscript & Readonly<{
+  packageManifestBase64: string;
+}>;
+
+export type ArchiveWorkerArtifactSource = Readonly<{
+  artifactBytes: number;
+  artifactSha512: string;
+  chunks(): AsyncIterable<Uint8Array>;
+  validateAfterRead(): Promise<void>;
+}>;
+
 export type ArchiveWorkerMaterializationSink = Readonly<{
   start(entry: TarArchiveTranscriptEntry, index: number): Promise<void>;
   write(entry: TarArchiveTranscriptEntry, index: number, offset: number, bytes: Buffer): Promise<void>;
@@ -105,7 +117,7 @@ type RuntimeIdentity = Readonly<{
   files: readonly FileIdentity[];
   workingDirectory: Readonly<{ path: string; device: string; inode: string; mode: string }>;
   launchConfig: Readonly<{
-    protocolVersion: 1;
+    protocolVersion: typeof ARCHIVE_WORKER_PROTOCOL_VERSION;
     expectedNodeMajor: 24 | 25 | 26;
     timeoutMs: number;
     maxFrameBytes: number;
@@ -141,12 +153,27 @@ export class BoundedArchiveWorker {
     limits: PackageStageLimits,
     signal?: AbortSignal,
   ): Promise<AuthenticatedArchiveWorkerTranscript> {
-    assertLimits(limits);
     const artifact = Buffer.from(artifactBytes);
-    const artifactSha512 = sha512(artifact);
+    return this.inspectSource(bufferArtifactSource(artifact), limits, signal);
+  }
+
+  async inspectSource(
+    source: ArchiveWorkerArtifactSource,
+    limits: PackageStageLimits,
+    signal?: AbortSignal,
+  ): Promise<AuthenticatedArchiveWorkerTranscript> {
+    assertLimits(limits);
+    assertArtifactSource(source, limits);
     const runtime = await this.#revalidateRuntime();
-    const request = requestFor('pass_a', artifact, artifactSha512, limits, this.#options.bodyChunkBytes, null);
-    const result = await this.#runPassA(request, artifact, runtime, signal);
+    const request = requestFor(
+      'pass_a',
+      source.artifactBytes,
+      source.artifactSha512,
+      limits,
+      this.#options.bodyChunkBytes,
+      null,
+    );
+    const result = await this.#runPassA(request, source, runtime, signal);
     const authenticated = deepFreeze({
       workerProtocolVersion: ARCHIVE_WORKER_PROTOCOL_VERSION,
       runtimeDigest: runtime.digest,
@@ -156,8 +183,39 @@ export class BoundedArchiveWorker {
     return authenticated;
   }
 
+  async inspectSourceWithManifest(
+    source: ArchiveWorkerArtifactSource,
+    limits: PackageStageLimits,
+    signal?: AbortSignal,
+  ): Promise<AuthenticatedArchiveWorkerManifestInspection> {
+    assertLimits(limits);
+    assertArtifactSource(source, limits);
+    const runtime = await this.#revalidateRuntime();
+    const request = requestFor(
+      'pass_a_manifest',
+      source.artifactBytes,
+      source.artifactSha512,
+      limits,
+      this.#options.bodyChunkBytes,
+      null,
+    );
+    const result = await this.#runPassAWithManifest(request, source, runtime, signal);
+    const authenticated = deepFreeze({
+      workerProtocolVersion: ARCHIVE_WORKER_PROTOCOL_VERSION,
+      runtimeDigest: runtime.digest,
+      transcript: result.transcript,
+      packageManifestBase64: result.packageManifestBase64,
+    });
+    this.#authenticated.add(authenticated);
+    return authenticated;
+  }
+
   authenticates(candidate: unknown): candidate is AuthenticatedArchiveWorkerTranscript {
     return typeof candidate === 'object' && candidate !== null && this.#authenticated.has(candidate);
+  }
+
+  get runtimeDigest(): string {
+    return this.#baseline.digest;
   }
 
   async materialize(
@@ -182,13 +240,20 @@ export class BoundedArchiveWorker {
     }
     const request = requestFor(
       'pass_b',
-      artifact,
+      artifact.length,
       authenticated.transcript.artifactSha512,
       limits,
       this.#options.bodyChunkBytes,
       authenticated.transcript.transcriptDigest,
     );
-    await this.#runPassB(request, artifact, runtime, authenticated.transcript, sink, signal);
+    await this.#runPassB(
+      request,
+      bufferArtifactSource(artifact),
+      runtime,
+      authenticated.transcript,
+      sink,
+      signal,
+    );
   }
 
   async #revalidateRuntime(): Promise<RuntimeIdentity> {
@@ -201,11 +266,11 @@ export class BoundedArchiveWorker {
 
   async #runPassA(
     request: ArchiveWorkerRequest,
-    artifact: Buffer,
+    source: ArchiveWorkerArtifactSource,
     runtime: RuntimeIdentity,
     signal?: AbortSignal,
   ): Promise<TarArchiveTranscript> {
-    const session = this.#spawn(request, artifact, signal);
+    const session = this.#spawn(request, source, signal);
     try {
       const first = await session.nextFrame();
       if (isErrorFrame(first)) {
@@ -227,15 +292,44 @@ export class BoundedArchiveWorker {
     }
   }
 
+  async #runPassAWithManifest(
+    request: ArchiveWorkerRequest,
+    source: ArchiveWorkerArtifactSource,
+    runtime: RuntimeIdentity,
+    signal?: AbortSignal,
+  ): Promise<Readonly<{ transcript: TarArchiveTranscript; packageManifestBase64: string }>> {
+    const session = this.#spawn(request, source, signal);
+    try {
+      const first = await session.nextFrame();
+      if (isErrorFrame(first)) {
+        await session.acknowledge();
+        await session.finishExpectedFailure();
+        throw new PackageStageError(first.code);
+      }
+      const transcript = validateTranscriptFrame(first, request, runtime.digest);
+      await session.acknowledge();
+      const packageManifestBase64 = await readPackageManifestFrames(session, transcript, this.#options.bodyChunkBytes);
+      const complete = validateCompleteFrame(await session.nextFrame(), 'pass_a_manifest', transcript);
+      assertCapabilities(complete.capabilities, this.#options.expectedNodeMajor);
+      await session.acknowledge();
+      await session.finishSuccess();
+      return Object.freeze({ transcript, packageManifestBase64 });
+    } catch (error) {
+      await session.abort();
+      if (error instanceof PackageStageError) throw error;
+      throw new PackageStageError('archive_protocol_invalid');
+    }
+  }
+
   async #runPassB(
     request: ArchiveWorkerRequest,
-    artifact: Buffer,
+    source: ArchiveWorkerArtifactSource,
     runtime: RuntimeIdentity,
     transcript: TarArchiveTranscript,
     sink: ArchiveWorkerMaterializationSink,
     signal?: AbortSignal,
   ): Promise<void> {
-    const session = this.#spawn(request, artifact, signal);
+    const session = this.#spawn(request, source, signal);
     try {
       for (let index = 0; index < transcript.entries.length; index += 1) {
         const expected = transcript.entries[index]!;
@@ -279,7 +373,7 @@ export class BoundedArchiveWorker {
     }
   }
 
-  #spawn(request: ArchiveWorkerRequest, artifact: Buffer, signal?: AbortSignal): WorkerSession {
+  #spawn(request: ArchiveWorkerRequest, source: ArchiveWorkerArtifactSource, signal?: AbortSignal): WorkerSession {
     const args = [
       `--max-old-space-size=${this.#options.maxOldSpaceMb}`,
       `--max-semi-space-size=${this.#options.maxSemiSpaceMb}`,
@@ -295,7 +389,7 @@ export class BoundedArchiveWorker {
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return new WorkerSession(child, request, artifact, this.#options, signal);
+    return new WorkerSession(child, request, source, this.#options, signal);
   }
 }
 
@@ -315,7 +409,7 @@ class WorkerSession {
   constructor(
     child: ChildProcessWithoutNullStreams,
     request: ArchiveWorkerRequest,
-    artifact: Buffer,
+    source: ArchiveWorkerArtifactSource,
     options: BoundedArchiveWorkerOptions,
     signal?: AbortSignal,
   ) {
@@ -347,8 +441,8 @@ class WorkerSession {
       signal.addEventListener('abort', listener, { once: true });
       if (signal.aborted) listener();
     }
-    void this.#writeInitial(request, artifact).catch(() => {
-      this.#fail(new PackageStageError('archive_worker_failed'));
+    void this.#writeInitial(request, source).catch((error: unknown) => {
+      this.#fail(error instanceof PackageStageError ? error : new PackageStageError('archive_worker_failed'));
     });
   }
 
@@ -389,9 +483,26 @@ class WorkerSession {
     this.#finish();
   }
 
-  async #writeInitial(request: ArchiveWorkerRequest, artifact: Buffer): Promise<void> {
+  async #writeInitial(request: ArchiveWorkerRequest, source: ArchiveWorkerArtifactSource): Promise<void> {
     await writeAll(this.#child.stdin, encodeArchiveWorkerRequestHeader(request));
-    await writeAll(this.#child.stdin, artifact);
+    const hash = createHash('sha512');
+    let observedBytes = 0;
+    try {
+      for await (const chunk of source.chunks()) {
+        if (!(chunk instanceof Uint8Array)) throw new PackageStageError('integrity_invalid');
+        if (chunk.byteLength === 0) continue;
+        observedBytes += chunk.byteLength;
+        if (observedBytes > request.artifactBytes) throw new PackageStageError('integrity_mismatch');
+        hash.update(chunk);
+        await writeAll(this.#child.stdin, Buffer.from(chunk));
+      }
+    } finally {
+      await source.validateAfterRead();
+    }
+    const observedSha512 = `sha512-${hash.digest('base64')}`;
+    if (observedBytes !== request.artifactBytes || observedSha512 !== request.artifactSha512) {
+      throw new PackageStageError('integrity_mismatch');
+    }
   }
 
   async #readFrame(): Promise<Record<string, unknown>> {
@@ -772,6 +883,74 @@ function validateEntryEnd(frame: Record<string, unknown>, expected: TarArchiveTr
   }
 }
 
+async function readPackageManifestFrames(
+  session: WorkerSession,
+  transcript: TarArchiveTranscript,
+  maximumChunkBytes: number,
+): Promise<string> {
+  const expectedIndex = transcript.entries.findIndex((entry) => entry.relativePath === 'package.json');
+  const expected = transcript.entries[expectedIndex];
+  if (
+    expectedIndex < 0
+    || expected === undefined
+    || expected.type !== 'file'
+    || expected.bodySha256 === null
+    || expected.declaredSize > ARCHIVE_WORKER_MAX_PACKAGE_MANIFEST_BYTES
+  ) {
+    throw new PackageStageError('archive_invalid');
+  }
+
+  const start = await session.nextFrame();
+  assertExactKeys(start, ['type', 'index', 'observedSize', 'bodySha256']);
+  if (
+    start.type !== 'manifest_start'
+    || start.index !== expectedIndex
+    || start.observedSize !== expected.observedSize
+    || start.bodySha256 !== expected.bodySha256
+  ) {
+    throw new PackageStageError('archive_protocol_invalid');
+  }
+  await session.acknowledge();
+
+  const chunks: Buffer[] = [];
+  const hash = createHash('sha256');
+  let offset = 0;
+  while (offset < expected.observedSize) {
+    const frame = await session.nextFrame();
+    assertExactKeys(frame, ['type', 'index', 'offset', 'bytes']);
+    if (
+      frame.type !== 'manifest_chunk'
+      || frame.index !== expectedIndex
+      || frame.offset !== offset
+      || typeof frame.bytes !== 'string'
+    ) {
+      throw new PackageStageError('archive_protocol_invalid');
+    }
+    const bytes = decodeCanonicalBase64(frame.bytes);
+    if (bytes.length === 0 || bytes.length > maximumChunkBytes || offset + bytes.length > expected.observedSize) {
+      throw new PackageStageError('archive_protocol_invalid');
+    }
+    chunks.push(bytes);
+    hash.update(bytes);
+    offset += bytes.length;
+    await session.acknowledge();
+  }
+
+  const end = await session.nextFrame();
+  assertExactKeys(end, ['type', 'index', 'observedSize', 'bodySha256']);
+  if (
+    end.type !== 'manifest_end'
+    || end.index !== expectedIndex
+    || end.observedSize !== offset
+    || end.bodySha256 !== expected.bodySha256
+    || hash.digest('hex') !== expected.bodySha256
+  ) {
+    throw new PackageStageError('archive_protocol_invalid');
+  }
+  await session.acknowledge();
+  return Buffer.concat(chunks, offset).toString('base64');
+}
+
 function validateCompleteFrame(
   frame: Record<string, unknown>,
   pass: ArchiveWorkerPass,
@@ -823,23 +1002,50 @@ function isErrorFrame(input: Record<string, unknown>): input is Record<string, u
 
 function requestFor(
   pass: ArchiveWorkerPass,
-  artifact: Buffer,
+  artifactBytes: number,
   artifactSha512: string,
   limits: PackageStageLimits,
   bodyChunkBytes: number,
   expectedTranscriptDigest: string | null,
 ): ArchiveWorkerRequest {
-  if (artifact.length === 0 || artifact.length > limits.compressedArtifactBytes) {
+  if (!Number.isSafeInteger(artifactBytes) || artifactBytes <= 0 || artifactBytes > limits.compressedArtifactBytes) {
     throw new PackageStageError('archive_limit_exceeded');
   }
   return deepFreeze({
     protocolVersion: ARCHIVE_WORKER_PROTOCOL_VERSION,
     pass,
-    artifactBytes: artifact.length,
+    artifactBytes,
     artifactSha512,
     bodyChunkBytes,
     expectedTranscriptDigest,
     limits: { ...limits },
+  });
+}
+
+function assertArtifactSource(source: ArchiveWorkerArtifactSource, limits: PackageStageLimits): void {
+  if (
+    typeof source !== 'object'
+    || source === null
+    || !Number.isSafeInteger(source.artifactBytes)
+    || source.artifactBytes <= 0
+    || source.artifactBytes > limits.compressedArtifactBytes
+    || !SHA512.test(source.artifactSha512)
+    || typeof source.chunks !== 'function'
+    || typeof source.validateAfterRead !== 'function'
+  ) {
+    throw new PackageStageError('integrity_invalid');
+  }
+}
+
+function bufferArtifactSource(artifact: Buffer): ArchiveWorkerArtifactSource {
+  const immutable = Buffer.from(artifact);
+  return Object.freeze({
+    artifactBytes: immutable.length,
+    artifactSha512: sha512(immutable),
+    async *chunks() {
+      yield immutable;
+    },
+    async validateAfterRead() {},
   });
 }
 

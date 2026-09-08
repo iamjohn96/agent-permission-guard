@@ -4,6 +4,7 @@ import { PackageStageError, type PackageStageErrorCode } from './profile.js';
 import {
   ARCHIVE_WORKER_ACK,
   ARCHIVE_WORKER_MAX_BODY_CHUNK_BYTES,
+  ARCHIVE_WORKER_MAX_PACKAGE_MANIFEST_BYTES,
   ARCHIVE_WORKER_MAX_REQUEST_BYTES,
   ARCHIVE_WORKER_PROTOCOL_VERSION,
   encodeArchiveWorkerFrame,
@@ -63,8 +64,41 @@ async function main(): Promise<void> {
     throw new PackageStageError('archive_invalid');
   }
 
-  if (request.pass === 'pass_a') {
+  if (request.pass === 'pass_a' || request.pass === 'pass_a_manifest') {
     await sendFrame(input, { type: 'transcript', transcript: inspection.transcript });
+    if (request.pass === 'pass_a_manifest') {
+      const manifestIndex = inspection.entries.findIndex((entry) => entry.transcript.relativePath === 'package.json');
+      const manifest = inspection.entries[manifestIndex];
+      if (
+        manifestIndex < 0
+        || manifest === undefined
+        || manifest.transcript.type !== 'file'
+        || manifest.body.length > ARCHIVE_WORKER_MAX_PACKAGE_MANIFEST_BYTES
+      ) {
+        throw new PackageStageError('archive_invalid');
+      }
+      await sendFrame(input, {
+        type: 'manifest_start',
+        index: manifestIndex,
+        observedSize: manifest.body.length,
+        bodySha256: manifest.transcript.bodySha256,
+      });
+      for (let offset = 0; offset < manifest.body.length; offset += request.bodyChunkBytes) {
+        const chunk = manifest.body.subarray(offset, Math.min(manifest.body.length, offset + request.bodyChunkBytes));
+        await sendFrame(input, {
+          type: 'manifest_chunk',
+          index: manifestIndex,
+          offset,
+          bytes: chunk.toString('base64'),
+        });
+      }
+      await sendFrame(input, {
+        type: 'manifest_end',
+        index: manifestIndex,
+        observedSize: manifest.body.length,
+        bodySha256: manifest.transcript.bodySha256,
+      });
+    }
   } else {
     if (inspection.transcript.transcriptDigest !== request.expectedTranscriptDigest) {
       throw new PackageStageError('archive_invalid');
@@ -132,12 +166,12 @@ function parseRequest(input: unknown): ArchiveWorkerRequest {
   ]);
   if (
     input.protocolVersion !== ARCHIVE_WORKER_PROTOCOL_VERSION
-    || !['pass_a', 'pass_b'].includes(String(input.pass))
+    || !['pass_a', 'pass_a_manifest', 'pass_b'].includes(String(input.pass))
     || !isPositiveInteger(input.artifactBytes)
     || !isSha512(input.artifactSha512)
     || !isPositiveInteger(input.bodyChunkBytes)
     || input.bodyChunkBytes > ARCHIVE_WORKER_MAX_BODY_CHUNK_BYTES
-    || (input.pass === 'pass_a' && input.expectedTranscriptDigest !== null)
+    || (input.pass !== 'pass_b' && input.expectedTranscriptDigest !== null)
     || (input.pass === 'pass_b' && !isSha256(input.expectedTranscriptDigest))
   ) {
     throw new PackageStageError('archive_protocol_invalid');
@@ -148,7 +182,7 @@ function parseRequest(input: unknown): ArchiveWorkerRequest {
   }
   return Object.freeze({
     protocolVersion: ARCHIVE_WORKER_PROTOCOL_VERSION,
-    pass: input.pass as 'pass_a' | 'pass_b',
+    pass: input.pass as 'pass_a' | 'pass_a_manifest' | 'pass_b',
     artifactBytes: input.artifactBytes,
     artifactSha512: input.artifactSha512,
     bodyChunkBytes: input.bodyChunkBytes,

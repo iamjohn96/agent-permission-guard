@@ -2,24 +2,16 @@
 
 ## Current Milestone
 
-The accepted Bounded Archive Worker & Two-Pass Materialization Architecture is implemented locally as a
-network-free synthetic foundation. Each pass uses a fresh permission-gated child, the parent
-authenticates the write-free pass-A transcript and compares bounded pass-B chunks, and only the APG
-parent writes beneath a private POSIX pending root. Complete tree validation, exclusive seal publication,
-and the ordered synthetic audit transition are required for an authenticated `READY` result.
+The Exact Production Graph Profile & Read-only Artifact Acceptance Architecture Check was accepted on
+2026-09-08 for a network-free foundation. Candidate/profile authority separation, closed synthetic lock
+compilation, fake-transport metadata confirmation, exact one-time artifact plans, private descriptor-backed
+artifact files, worker protocol v2 manifest evidence, double Pass A, bounded package-manifest projection,
+synthetic audit/report state, and test-only human-review promotion are implemented and verified locally.
 
-The exact `tar@7.5.22` dependency and candidate-backed network-free archive fixture foundation remain
-implemented locally and uncommitted. The reviewed six-node graph is exact, only `tar/parse` is imported,
-and all 52 library-independent fixtures pass through an APG-owned strict gzip/USTAR envelope plus
-candidate interpretation checks and the bounded child boundary. Synthetic temporary materialization has
-run; no real MCP package archive, registry access, production profile, persistent stage, receipt/database
-change, or startup path has run.
-
-The committed stage foundation accepts only owning-authority synthetic exact graph profiles, separates plan
-and one-time synthetic approval identities, validates injected bytes/archive descriptions and
-test-created trees, and exposes no public CLI path. Production registry access, target-package download,
-archive extraction, persistent staging, production profiles, receipt schema 1.2, and package startup
-remain separately gated.
+The exact parser plus bounded worker/two-pass POSIX materializer foundation is committed and pushed at
+`46497f9`. All archive work to date used repository-owned synthetic bytes and disposable private
+directories. No real MCP package archive, new registry request, production graph profile, persistent
+stage, receipt/database change, or staged package startup has occurred in the current milestone.
 
 ## Completed
 
@@ -155,11 +147,25 @@ remain separately gated.
   - exclusive read-only seal plus ordered synthetic audit with post-seal audit failure blocking `READY`
   - monotonic pass/seal states, runtime drift rejection, quarantine without blind cleanup
   - all 52 fixtures through child processes and isolated temporary materialization only
+- Bounded Archive Worker foundation committed and pushed at `46497f9`
+- Exact Production Graph Profile & Read-only Artifact Acceptance Architecture Check accepted on 2026-09-08
+- Network-free Exact Production Graph and Read-only Artifact Acceptance foundation implemented locally:
+  - candidate and accepted production profile are owned by separate authorities
+  - strict synthetic lockfile-v3 compilation binds exact Node-resolution install edges and rejects unsupported graph behavior
+  - complete fresh metadata confirmation uses fake transports with exact URL/integrity and byte/deadline limits
+  - one-time approval binds the complete ordered artifact set, runtime, protocol, limits, and private root
+  - exclusive private files are SHA-512 verified before descriptor-backed worker access
+  - worker protocol v2 supports bounded package-manifest evidence without Pass B
+  - two independent Pass-A processes, transcript equality, duplicate-key rejection, manifest projection,
+    exact cleanup, and synthetic terminal evidence precede test-only profile promotion
+  - no registry request, npm graph generation, real artifact, materialization, persistent stage, DB change,
+    CLI integration, package startup, or production profile registration
 
 ## In Progress
 
-- The combined exact parser and bounded worker/materializer checkpoint is complete locally and ready for
-  diff review plus separate commit/push approval. Real untrusted archive use remains separately blocked.
+- The network-free Exact Production Graph Profile & Read-only Artifact Acceptance foundation is complete
+  locally and awaiting commit/push approval. Real graph genesis, metadata reads, artifact downloads,
+  production registration, materialization, and startup remain separate approval boundaries.
 
 ## Remaining
 
@@ -237,6 +243,10 @@ remain separately gated.
   Registry signatures remain unverified. Synchronous parser CPU now runs inside a bounded child for the
   new path, but Node 24/25 cross-version behavior is not yet evidenced and the child boundary is not an
   OS sandbox. It is not approved for a real untrusted package artifact or persistent materialization.
+- Exact production graph acceptance remains foundation-only. Metadata and artifact adapters have injectable
+  network-free interfaces but no production HTTPS implementation or built-in Filesystem graph. Synthetic
+  acceptance does not establish publisher identity, source/build equivalence, maliciousness, sandboxing,
+  materialized-tree integrity, launch readiness, or protection for direct npm/npx bypasses.
 - Node's Permission Model is defense in depth, not a malicious-code security boundary. Node 24 has no
   network permission gate, and standard Node filesystem APIs cannot eliminate same-user
   intermediate-component races. The proposed architecture therefore blocks unsupported real-worker
@@ -253,7 +263,11 @@ remain separately gated.
 
 ## Tests
 
-- Current final network-free local suite with one worker: 212 passed, 3 skipped on 2026-09-07.
+- Current final network-free local suite with one worker: 218 passed, 3 skipped on 2026-09-08.
+- Exact production graph/read-only acceptance focused coverage: 6 passed. Cases cover candidate authority
+  forgery, unsupported/unreachable/cyclic locks, exact Node ancestor resolution, metadata mismatch,
+  metadata/artifact deadlines, one-time approval replay, private artifact streaming, two fresh descriptor-backed Pass-A workers,
+  complete cleanup before profile promotion, duplicate manifest keys, and pre-parser SHA-512 rejection.
 - Bounded worker/materializer focused coverage: 12 passed. All 52 fixtures run through fresh child
   processes; additional cases cover pass-B streaming, cross-pass substitution, authority forgery,
   pre-cancel, runtime drift, unsafe cwd, timeout, malformed stdout, stderr overflow, private-root writes,
@@ -312,8 +326,9 @@ remain separately gated.
 
 ## Next Recommended Task
 
-Review and separately approve committing and pushing the combined exact `tar@7.5.22` parser plus bounded
-worker/materializer checkpoint. After that, perform an Exact Production Graph Profile & Read-only
-Artifact Acceptance Architecture Check. Do not access a live registry, download a real artifact, create
-a production profile or persistent stage, change receipts/database schema, or start package code until
-that later architecture and action receive separate approval.
+Review and accept or revise
+`docs/exact-production-graph-profile-read-only-artifact-acceptance-architecture-check.md`. If accepted,
+implement only its network-free schema, authority, fake-transport, descriptor-worker, double-Pass-A,
+manifest-projection, and synthetic evidence foundation. Do not run npm/npx, access a live registry,
+download a real artifact, register a production profile, create a persistent stage, change receipts or
+database schema, or start package code until the corresponding later action receives separate approval.
