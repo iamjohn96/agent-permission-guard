@@ -2,8 +2,14 @@
 
 ## Current Milestone
 
-The Exact Real Metadata-only Graph Genesis Plan Architecture Check was accepted on 2026-09-08 and its
-network-free production-adapter hardening is implemented and verified locally. The checkpoint separates the
+The Exact Local Graph Genesis Plan Capture & Preflight Architecture Check was accepted on 2026-09-08;
+its internal preparation workflow, disposable SQLite adapter and actual local capture are implemented and
+verified locally, not yet committed. The capture passed and closed all owned resources; no reusable execution
+authority, real npm CLI invocation or public DNS/registry request was created. See
+`docs/exact-local-graph-genesis-plan-capture-preflight-architecture-check.md`.
+
+The prior Exact Real Metadata-only Graph Genesis Plan Architecture Check was accepted on 2026-09-08 and its
+network-free production-adapter hardening is committed and pushed at `3860338`. The checkpoint separates the
 safe plan from its private execution capsule and closes the owned runtime/probe/workspace, concurrent broker,
 pinned HTTPS, process supervision, strict post-state, no-follow cleanup, ordered audit, and final completion
 authority gaps. No public DNS/registry request or real npm launch has occurred.
@@ -198,10 +204,14 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## In Progress
 
-- Network-free production-adapter hardening is complete but uncommitted. The next proposed work is an Exact
-  Local Graph Genesis Plan Capture & Preflight Architecture Check. It may prepare concrete host-bound plan
-  evidence and run only the owned local containment/version preflight; real npm and public DNS/registry
-  access remain a later one-time approval boundary.
+- Network-free preparation composition, disposable SQLite adapter and local capture are complete and await
+  scoped review/commit. The final real local capture returned `local_preflight_passed` with cleanup passed,
+  session closed, execution unauthorized and plan non-reusable.
+- A closed rehearsal report is evidence-only, not reusable approval or execution authority. Production
+  approval composition, sink binding, expiry/cancellation rechecks and real-run orchestration remain blockers.
+- The implemented preflight audit adapter reuses the current schema only in a new owned temporary DB, with namespaced
+  preflight events, a dedicated parent row and committed/reopened chain verification; it creates no receipt
+  or fictional approval and does not open the product audit database.
 
 ## Remaining
 
@@ -283,8 +293,8 @@ stage, receipt/database change, or staged package startup has occurred in the cu
   network-free interfaces but no production HTTPS implementation or built-in Filesystem graph. Synthetic
   acceptance does not establish publisher identity, source/build equivalence, maliciousness, sandboxing,
   materialized-tree integrity, launch readiness, or protection for direct npm/npx bypasses.
-- Metadata-only graph genesis remains foundation-only. The broker has no production listener or HTTPS
-  transport and the workflow has not run npm or contacted the registry. Its macOS Seatbelt provider is a
+- Metadata-only graph genesis remains foundation-only. Production-shaped listener and HTTPS transport now
+  exist, but the composed workflow has not run npm or contacted the registry. Its macOS Seatbelt provider is a
   deprecated/private, exact-host development mechanism, not a supported production sandbox; every real plan
   must repeat the complete local-only containment probe and fail closed on any drift or unavailable negative
   test. Node's `--allow-net` remains broad without that provider.
@@ -304,7 +314,16 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Tests
 
-- Current final network-free local suite: 242 passed, 3 skipped on 2026-09-08.
+- Final network-free full regression: 263 passed, 3 skipped on 2026-09-08. The subsequently added compiled
+  cancellation suite passed 5/5 against the same unchanged runtime build. Build and final typecheck passed.
+- Preparation/SQLite focused coverage: 21 passed for real disposable commit/reopen, concurrent scheduling,
+  closed event sequence, malformed/oversize/forged input, lock timeout, injected insertion failure,
+  chain/schema/parent/file/directory substitution, ambiguous cleanup, pre-cancel and entry-point restrictions.
+- Compiled cancellation coverage: 5 passed for cancellation immediately after runtime capture, workspace
+  creation, containment observation, audit reopen and cleanup; every report remained unauthorized/non-reusable.
+- Final local capture at 2026-09-08T10:52:03.863Z passed runtime/version/containment/audit/revalidation checks;
+  three audit events verified after reopen, owned temporary state removed, session closed. No public DNS,
+  registry, npm CLI or package execution occurred. Exact safe evidence is in the Architecture Check document.
 - Production-adapter hardening focused coverage: 16 passed across public-plan/private-capsule separation,
   authority-owned runtime/version/workspace/probe evidence, runtime drift with zero spawn, public/private and
   mixed DNS classification, pinned transport construction, durable request-before-transport ordering,
@@ -385,9 +404,10 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Next Recommended Task
 
-First review and, if approved, commit/push the completed network-free hardening. Then prepare an Exact Local
-Graph Genesis Plan Capture & Preflight Architecture Check covering production composition, durable audit
-adapter shape, exact temporary roots, fresh runtime/version/containment capture, abort coupling, and the safe
-approval projection. Do not run real npm/npx, resolve public DNS, access a live registry, write the product
-audit database, download an artifact, register a profile, materialize a stage, or start package code until
-the corresponding later action receives separate approval.
+Review and commit/push the completed Local Graph Genesis Preflight implementation when authorized. Next,
+prepare the Production Graph Genesis Approval & Execution Composition Architecture Check: genuine one-time
+approval delivery, exact sink/session binding, deadline/cancel rechecks, and ownership of the full production
+state machine. The preflight adapter does not implement an execution audit sink or production approval.
+Do not run real npm/npx, public DNS/registry, artifact downloads, product DB writes, profile registration,
+materialization or package startup. A future real run requires fresh live-session evidence and its own
+approval, never the closed rehearsal hash. Continue in this chat as requested by the user.

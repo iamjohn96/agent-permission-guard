@@ -102,7 +102,7 @@ export interface RuntimeVersionProbeExecutor {
 export class NodeRuntimeVersionProbeExecutor implements RuntimeVersionProbeExecutor {
   readonly implementationKind = 'local_observed' as const;
 
-  constructor() { NODE_RUNTIME_VERSION_EXECUTORS.add(this); }
+  constructor(private readonly signal?: AbortSignal) { NODE_RUNTIME_VERSION_EXECUTORS.add(this); }
 
   async observe(input: Readonly<{
     node: AuthenticatedRuntimeFileSnapshot;
@@ -118,6 +118,7 @@ export class NodeRuntimeVersionProbeExecutor implements RuntimeVersionProbeExecu
         timeout: 5_000,
         maxBuffer: 1_024,
         windowsHide: true,
+        ...(this.signal === undefined ? {} : { signal: this.signal }),
       } as const;
       const node = await execFileAsync(input.node.absolutePath, ['--version'], options);
       const npm = await execFileAsync(input.node.absolutePath, [
@@ -195,12 +196,13 @@ export interface HostPlatformProbeExecutor {
 export class NodeHostPlatformProbeExecutor implements HostPlatformProbeExecutor {
   readonly implementationKind = 'local_observed' as const;
 
-  constructor() { NODE_HOST_PLATFORM_EXECUTORS.add(this); }
+  constructor(private readonly signal?: AbortSignal) { NODE_HOST_PLATFORM_EXECUTORS.add(this); }
 
   async observe(): Promise<Readonly<{ platform: string; architecture: string; osBuild: string; bootSessionId: string }>> {
     try {
       const options = {
         env: { LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }, timeout: 5_000, maxBuffer: 1_024, windowsHide: true,
+        ...(this.signal === undefined ? {} : { signal: this.signal }),
       } as const;
       const build = await execFileAsync('/usr/bin/sw_vers', ['-buildVersion'], options);
       const boot = await execFileAsync('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid'], options);

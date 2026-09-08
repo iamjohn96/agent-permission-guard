@@ -474,6 +474,12 @@ export class HardenedLoopbackBrokerListener {
     this.#session = session;
   }
 
+  assertDisarmedPort(port: number): void {
+    const address = this.#server?.address();
+    if (this.#session !== undefined || this.#port !== port || !address || typeof address === 'string'
+      || address.address !== '127.0.0.1' || address.port !== port) failMetadata();
+  }
+
   async close(): Promise<void> {
     const server = this.#server;
     this.#server = undefined;

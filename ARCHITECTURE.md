@@ -316,3 +316,16 @@ Cleanup inventories and removes only the exact private tree and quarantines ambi
 This remains a development-host foundation. It has not run real npm or public DNS/registry traffic, and the
 local Seatbelt provider is not a supported production sandbox. See
 `docs/exact-real-metadata-only-graph-genesis-plan-architecture-check.md`.
+
+## Local Graph Genesis Preparation
+
+The internal development entry point implements an owned network-free preparation composition and an isolated
+temporary SQLite audit adapter. A capture rehearsal closes its listener, workspace and capsule before
+returning a safe evidence-only report; it cannot authorize or resume execution. Version evidence distinguishes
+the observed Node version from the npm manifest version, and preflight events never impersonate execution
+authorization or receipt events. The existing audit schema requires a dedicated parent row.
+
+Production approval, exact sink/session binding, host/boot and expiry revalidation, and cancellation across
+awaited pre-dispatch work remain real-run blockers. Local capture passed on 2026-09-08; its plan is expired
+and non-reusable. The preflight entry point has no approval or execution-supervisor connection. See
+`docs/exact-local-graph-genesis-plan-capture-preflight-architecture-check.md`.

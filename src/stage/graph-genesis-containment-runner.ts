@@ -23,6 +23,8 @@ const execFileAsync = promisify(execFile);
 export class LocalSeatbeltContainmentProbeExecutor implements ContainmentProbeExecutor {
   readonly implementationKind = 'local_observed' as const;
 
+  constructor(private readonly signal?: AbortSignal) {}
+
   async run(
     binding: ContainmentProbeBinding,
     _profile: SeatbeltLoopbackProfile,
@@ -63,6 +65,7 @@ export class LocalSeatbeltContainmentProbeExecutor implements ContainmentProbeEx
         timeout: 10_000,
         maxBuffer: 64 * 1024,
         windowsHide: true,
+        ...(this.signal === undefined ? {} : { signal: this.signal }),
       });
       if (Buffer.byteLength(result.stdout) > 64 * 1024 || Buffer.byteLength(result.stderr) > 64 * 1024
         || await exists(outsidePath)) failProbe();

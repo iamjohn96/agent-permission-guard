@@ -403,3 +403,28 @@ adapter, and separately approved public egress.
 
 Revisit If: A supported destination-scoped sandbox replaces Seatbelt, the target/runtime changes, a signed
 receipt or external anchor is added, or the resolver/registry trust model changes.
+
+## Local preflight closes its session and cannot authorize execution
+
+Date: 2026-09-08
+
+Context: Runtime/probe/plan foundations need a real local composition check, but durable execution approval
+and a production Graph Genesis audit sink do not yet exist. Persisting a plan hash cannot preserve the
+memory-only capability or listener/workspace identity after a chat turn.
+
+Decision: Run an internal network-free capture rehearsal that owns concrete collaborators and emits only a
+safe evidence report. Close sockets, audit connections and private temporary state before returning; mark
+every report execution-unauthorized and non-reusable. Audit preflight with three fixed namespaced events in
+a newly owned disposable SQLite database, verify exact records/schema/chain after reopening, and create no
+approval or receipt. Bind Node observation separately from npm manifest-version evidence.
+
+Alternatives: Keep an indefinite live session across chat approval; serialize the capsule; reuse product
+audit/receipt methods to simulate execution; treat a passed probe or saved plan hash as approval.
+
+Reason: Local capability observation and durable preparation evidence are useful without implying permission
+to perform external reads. The closed rehearsal can be verified and cleaned within one bounded operation.
+
+Trade-offs: A future execution needs fresh evidence, a genuine approval provider, and production composition.
+Path-based cleanup retains same-user races; SQLite reopen is not power-loss or independent-history proof.
+
+Revisit If: A separately reviewed live approval workflow or retained execution audit sink is introduced.
