@@ -13,6 +13,7 @@ type PendingEntry = {
   request: ApprovalRequestView;
   resolve: (outcome: ApprovalOutcome) => void;
   timer: ReturnType<typeof setTimeout>;
+  visible: boolean;
 };
 
 export class LocalApprovalService implements ApprovalCoordinator {
@@ -22,6 +23,16 @@ export class LocalApprovalService implements ApprovalCoordinator {
   constructor(private readonly now: () => Date = () => new Date()) {}
 
   request(
+    input: Omit<ApprovalRequestView, 'id' | 'requestedAt' | 'expiresAt'>,
+    ttlMs: number,
+  ): ApprovalTicket {
+    const ticket = this.requestHidden(input, ttlMs);
+    this.publish(ticket.request.id);
+    return ticket;
+  }
+
+  /** Used by authorities that must durably record a request before Dashboard visibility. */
+  requestHidden(
     input: Omit<ApprovalRequestView, 'id' | 'requestedAt' | 'expiresAt'>,
     ttlMs: number,
   ): ApprovalTicket {
@@ -44,7 +55,7 @@ export class LocalApprovalService implements ApprovalCoordinator {
     const outcome = new Promise<ApprovalOutcome>((resolve) => { settle = resolve; });
     const timer = setTimeout(() => this.settle(id, 'expired'), ttlMs);
     timer.unref();
-    this.pending.set(id, { request, resolve: settle, timer });
+    this.pending.set(id, { request, resolve: settle, timer, visible: false });
 
     return {
       request,
@@ -53,15 +64,22 @@ export class LocalApprovalService implements ApprovalCoordinator {
     };
   }
 
+  publish(id: string): void {
+    const entry = this.pending.get(id);
+    if (entry === undefined) throw new Error('Approval is no longer pending');
+    entry.visible = true;
+  }
+
   listPending(): readonly ApprovalRequestView[] {
     return [...this.pending.values()]
+      .filter((entry) => entry.visible)
       .map((entry) => entry.request)
       .sort((left, right) => left.requestedAt < right.requestedAt ? -1 : 1);
   }
 
   decide(id: string, decision: 'approved' | 'denied'): ApprovalOutcome | undefined {
     const entry = this.pending.get(id);
-    if (entry === undefined) return undefined;
+    if (entry === undefined || !entry.visible) return undefined;
     if (Date.parse(entry.request.expiresAt) <= this.now().getTime()) {
       this.settle(id, 'expired');
       return 'expired';

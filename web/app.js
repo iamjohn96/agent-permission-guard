@@ -43,12 +43,24 @@ function renderApprovals(requests) {
     const card = element('article', 'request-card');
     const top = element('div', 'request-top');
     const title = element('div');
-    const source = request.kind === 'install' ? 'Install Guard' : request.serverId;
+    const source = request.kind === 'install'
+      ? 'Install Guard'
+      : request.kind === 'graph_genesis' ? 'Graph Genesis' : request.serverId;
     title.append(element('p', 'server', source), element('h3', '', request.toolName));
     top.append(title, element('span', `risk risk-${request.risk.band}`, `${request.risk.score} · ${request.risk.band}`));
     const meta = element('div', 'meta');
     meta.append(element('span', '', `Expires ${new Date(request.expiresAt).toLocaleTimeString()}`), element('span', '', request.reasonCodes.join(' · ')));
     let identity;
+    if (request.graphGenesis) {
+      identity = element('div', 'identity identity-adapter_action_exact');
+      identity.append(
+        element('strong', '', 'Identity: Exact execution envelope'),
+        element('span', '', `Target: ${request.graphGenesis.target}`),
+        element('span', '', `Registry: ${request.graphGenesis.registryOrigin}`),
+        element('span', '', 'Approval: one bounded metadata-only graph genesis run'),
+        element('span', '', request.graphGenesis.bypassWarning),
+      );
+    }
     if (request.identity) {
       const identityLabel = {
         adapter_action_exact: 'Exact adapter action',
@@ -68,7 +80,9 @@ function renderApprovals(requests) {
     }
     const pre = element('pre');
     pre.textContent = JSON.stringify(
-      request.identity?.safeClaims?.length
+      request.graphGenesis
+        ? request.graphGenesis
+        : request.identity?.safeClaims?.length
         ? { safeIdentityClaims: request.identity.safeClaims }
         : request.identity?.assurance === 'adapter_action_exact'
           ? { parameters: 'None', safeIdentityClaims: [] }
@@ -172,6 +186,15 @@ async function loadPolicy() {
   } catch (error) { showError(error.message); }
 }
 
+async function loadCapabilities() {
+  try {
+    const payload = await api('/api/health');
+    const policyEnabled = Array.isArray(payload.capabilities) && payload.capabilities.includes('policy');
+    const policyTab = document.querySelector('[data-panel="policy"]');
+    if (policyTab) policyTab.hidden = !policyEnabled;
+  } catch (error) { showError(error.message); }
+}
+
 async function savePolicy() {
   if (!policyRevision) return showError('Reload the active policy before saving.');
   if (!confirm('Apply this security policy to all new tool calls?')) return;
@@ -209,9 +232,10 @@ document.querySelectorAll('.tab').forEach((tab) => {
 
 document.querySelector('#refresh-approvals').addEventListener('click', loadApprovals);
 document.querySelector('#refresh-audit').addEventListener('click', loadAudit);
-document.querySelector('#reload-policy').addEventListener('click', loadPolicy);
-document.querySelector('#save-policy').addEventListener('click', savePolicy);
-policySource.addEventListener('input', () => { policyMessage.textContent = 'Unsaved changes.'; });
+document.querySelector('#reload-policy')?.addEventListener('click', loadPolicy);
+document.querySelector('#save-policy')?.addEventListener('click', savePolicy);
+policySource?.addEventListener('input', () => { policyMessage.textContent = 'Unsaved changes.'; });
+loadCapabilities();
 loadApprovals();
 loadAudit();
 setInterval(loadApprovals, 2_000);

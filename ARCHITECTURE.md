@@ -329,3 +329,27 @@ Production approval, exact sink/session binding, host/boot and expiry revalidati
 awaited pre-dispatch work remain real-run blockers. Local capture passed on 2026-09-08; its plan is expired
 and non-reusable. The preflight entry point has no approval or execution-supervisor connection. See
 `docs/exact-local-graph-genesis-plan-capture-preflight-architecture-check.md`.
+
+## Production Graph Genesis Composition Foundation
+
+The implemented network-free composition foundation places one live session authority around approval, persistent audit,
+broker/listener/transport, process supervision, post-state, candidate output, cleanup and completion. Approval
+binds an execution envelope that includes the plan/projection, Dashboard instance, runtime and boot evidence,
+built-in policy, audit sink, output target, limits and pre-start deadline. A plan hash alone is insufficient.
+
+The local approval UI records possession of the current Dashboard capability and can run without policy-editing
+capability. Broker and supervisor require the same one-time start lease. A central abort owner and tracked
+listener drain prevent child/request success from racing terminal state. Receipt schema 1.2 represents this
+specific boundary while retaining portable-unsigned limitations.
+
+The existing production audit DB opener authenticates its live handle and records canonical file identity,
+exact schema, database instance, and chain tail. Session creation transactionally revalidates those values;
+copied handles, substituted DBs, and intervening chain writes cannot be rebound to an already prepared envelope.
+
+A successful future live run may write a bounded candidate artifact containing public graph evidence. The
+foundation's exclusive private writer and later importer require
+matching terminal audit and Outcome Receipt evidence; the artifact alone is not a profile, stage, package
+safety result, or execution capability. Automated coverage uses only disposable DBs/directories, a fake
+metadata transport and an in-memory inert child. The production CLI, real npm adapter, public transport,
+product DB and real candidate path remain deliberately disconnected. See
+`docs/production-graph-genesis-approval-execution-composition-architecture-check.md`.

@@ -562,6 +562,9 @@ class FakeExecutionPlanner implements InstallExecutionPlanner {
 class PostExecutionFailingAuditRecorder implements AuditRecorder {
   begin(): AuditCall {
     return {
+      actionId: '00000000-0000-4000-8000-000000000000',
+      markAuthorized() {},
+      markExecutionStarted() {},
       markForwarding() {},
       markApprovalRequested() {},
       markApprovalResolved() {},
@@ -569,6 +572,7 @@ class PostExecutionFailingAuditRecorder implements AuditRecorder {
       markCompleted() {},
       markExecutionResult() { throw new Error('private audit storage failure'); },
       markFailed() {},
+      appendEvidence() {},
     };
   }
 }

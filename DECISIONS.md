@@ -428,3 +428,39 @@ Trade-offs: A future execution needs fresh evidence, a genuine approval provider
 Path-based cleanup retains same-user races; SQLite reopen is not power-loss or independent-history proof.
 
 Revisit If: A separately reviewed live approval workflow or retained execution audit sink is introduced.
+
+## Production Graph Genesis approval binds a live execution envelope, not a saved plan hash
+
+Date: 2026-09-08
+
+Context: Local preflight proved that the exact host can prepare and close a safe plan, but its memory-only
+capabilities expire on close. The current supervisor can still be invoked without approval evidence, the
+listener does not authenticate request drain, and the in-memory graph candidate cannot support later stages.
+
+Decision: Introduce one production session authority. Bind approval to the exact plan/projection, Dashboard
+instance, runtime/boot, built-in Ask policy, persistent audit sink, candidate output, limits and deadline.
+Require its one-time start lease across broker and supervisor, coordinate failures through one abort owner,
+and require child close plus listener drain before post-state. Persist only a bounded public candidate whose
+later import also verifies matching terminal audit and portable unsigned Outcome Receipt evidence.
+
+Alternatives: Approve only `planHash`; reuse the closed preflight plan; let broker and supervisor authenticate
+independently; keep the candidate solely in a long-lived process; accept any candidate file with a valid
+self-digest; use the MCP policy editor to weaken the built-in Ask decision.
+
+Reason: The approved consequence includes external disclosure, local process execution and persistent writes.
+Every authority and durable result must refer to the same live action, and copied evidence cannot grant it.
+
+Trade-offs: The first path is fixed to one macOS/Node/npm/Filesystem profile and adds a receipt minor version,
+Dashboard capability mode and persistent output. It still cannot prove human identity, registry honesty,
+package safety, kernel integrity, hostile same-user containment or independently immutable audit history.
+
+Implementation: The accepted network-free foundation now binds the exact execution envelope to a type-specific
+Graph Genesis approval and receipt 1.2, hides approval requests until their durable row exists, requires the
+same two-phase start lease at broker arm and process spawn, drains tracked listener work, and provides
+post-state-bound cleanup plus terminal-proof candidate import. The existing audit DB handle is authority-owned
+and its canonical file identity, schema, and captured chain tail are revalidated transactionally before the
+session begins. Only synthetic transport/inert-child and
+disposable persistence tests are connected; the real CLI action remains unavailable.
+
+Revisit If: A supported sandbox, authenticated team approval, signed/anchored receipt, hosted audit authority,
+different graph generator, target/runtime profile, or transactionally coupled artifact store is introduced.

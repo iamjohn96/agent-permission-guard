@@ -660,6 +660,25 @@ export interface HardenedGraphGenesisAuthorizationVerifier {
   authenticatesAuthorization(value: unknown): value is HardenedGraphGenesisAuthorization;
 }
 
+export type AuthenticatedGraphGenesisStartLease = Readonly<{
+  leaseVersion: 1;
+  planHash: string;
+  executionEnvelopeHash: string;
+  approvalId: string;
+  startByMonotonicMs: number;
+  executionDeadlineMonotonicMs: number;
+  leaseDigest: string;
+}>;
+
+export interface GraphGenesisStartLeaseVerifier {
+  authenticatesStartLease(value: unknown, planHash: string): value is AuthenticatedGraphGenesisStartLease;
+  consumeStartLease(
+    value: AuthenticatedGraphGenesisStartLease,
+    phase: 'broker_arm' | 'process_spawn',
+    monotonicNowMs: number,
+  ): boolean;
+}
+
 export type HardenedGraphGenesisAuthorization = Readonly<{
   authorizationVersion: 1;
   implementationKind: 'production' | 'synthetic';

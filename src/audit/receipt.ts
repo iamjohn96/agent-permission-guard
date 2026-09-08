@@ -22,7 +22,7 @@ const TimestampSchema = z.iso.datetime({ offset: true });
 const SchemaIdentitySchema = z.object({
   name: z.literal('apg-action-receipt'),
   majorVersion: z.literal(1),
-  minorVersion: z.union([z.literal(0), z.literal(1)]),
+  minorVersion: z.union([z.literal(0), z.literal(1), z.literal(2)]),
   canonicalization: z.literal('apg-canonical-json-v1'),
 }).strict();
 
@@ -139,7 +139,7 @@ const ActionSchema = z.object({
 
 const CoverageSchema = z.object({
   routedThroughApg: z.literal(true),
-  boundary: z.enum(['mcp_proxy_call', 'install_guard_plan', 'apg_local_control']),
+  boundary: z.enum(['mcp_proxy_call', 'install_guard_plan', 'apg_local_control', 'graph_genesis_plan']),
   observed: z.array(IdentifierSchema).max(20),
   notObserved: z.array(IdentifierSchema).max(20),
 }).strict();
@@ -236,7 +236,7 @@ const AuthorizationSchema = z.object({
 }).strict();
 
 const ObservedResultSchema = z.object({
-  kind: z.enum(['mcp', 'install', 'generic']),
+  kind: z.enum(['mcp', 'install', 'generic', 'graph_genesis']),
   isError: z.boolean(),
   contentTypes: z.array(IdentifierSchema).max(20).optional(),
   contentCount: z.number().int().min(0).max(1_000_000).optional(),
@@ -251,6 +251,16 @@ const ObservedResultSchema = z.object({
   approvedIntegrityObserved: z.boolean().optional(),
   changedFiles: z.array(z.enum(['package.json', 'package-lock.json', 'npm-shrinkwrap.json'])).max(3).optional(),
   verificationReasonCodes: z.array(ReasonCodeSchema).max(100).optional(),
+  externalReadStatus: z.enum(['not_started', 'started', 'validated', 'incomplete']).optional(),
+  metadataRequestCount: z.number().int().min(0).max(512).optional(),
+  metadataUniquePackageCount: z.number().int().min(0).max(256).optional(),
+  metadataResponseBytes: z.number().int().min(0).max(134_217_728).optional(),
+  lockDigest: DigestSchema.optional(),
+  candidateDigest: DigestSchema.optional(),
+  candidateArtifactDigest: DigestSchema.optional(),
+  cleanupStatus: z.enum(['not_needed', 'complete', 'quarantined', 'incomplete']).optional(),
+  quarantineReferenceDigest: DigestSchema.optional(),
+  terminalAuditStatus: z.enum(['complete', 'failed', 'unknown']).optional(),
   errorCode: ReasonCodeSchema.optional(),
 }).strict();
 
@@ -272,6 +282,9 @@ export const AuthorizationReceiptSchema = z.object({
   limitations: LimitationsSchema,
 }).strict().superRefine((receipt, context) => {
   validateReceiptIdentityVersion(receipt.schema, receipt.action, context);
+  if ((receipt.schema.minorVersion === 2) !== (receipt.coverage.boundary === 'graph_genesis_plan')) {
+    context.addIssue({ code: 'custom', message: 'Receipt schema 1.2 is reserved for the Graph Genesis boundary' });
+  }
   if (
     receipt.authorization.status === 'authorized'
     && (
@@ -305,6 +318,7 @@ export const OutcomeReceiptSchema = z.object({
       'cancelled',
       'failed',
       'audit_failed',
+      'incomplete_external_read',
       'outcome_unknown_after_interruption',
     ]),
     completedAt: TimestampSchema.optional(),
@@ -315,6 +329,13 @@ export const OutcomeReceiptSchema = z.object({
   limitations: LimitationsSchema,
 }).strict().superRefine((receipt, context) => {
   validateReceiptIdentityVersion(receipt.schema, receipt.action, context);
+  if ((receipt.schema.minorVersion === 2) !== (receipt.coverage.boundary === 'graph_genesis_plan')) {
+    context.addIssue({ code: 'custom', message: 'Receipt schema 1.2 is reserved for the Graph Genesis boundary' });
+  }
+  if (receipt.schema.minorVersion === 2 && receipt.execution.observedResult !== undefined
+    && receipt.execution.observedResult.kind !== 'graph_genesis') {
+    context.addIssue({ code: 'custom', message: 'Graph Genesis outcome requires a Graph Genesis observed result' });
+  }
 });
 
 export type AuthorizationReceipt = z.infer<typeof AuthorizationReceiptSchema>;
@@ -486,7 +507,7 @@ function schemaIdentity(context: ReceiptContext): z.infer<typeof SchemaIdentityS
   return {
     name: 'apg-action-receipt',
     majorVersion: 1,
-    minorVersion: context.identityEvidence === undefined ? 0 : 1,
+    minorVersion: context.boundary === 'graph_genesis_plan' ? 2 : context.identityEvidence === undefined ? 0 : 1,
     canonicalization: 'apg-canonical-json-v1',
   };
 }
@@ -501,6 +522,13 @@ function validateReceiptIdentityVersion(
   }
   if (schema.minorVersion === 1 && action.identityEvidence === undefined) {
     context.addIssue({ code: 'custom', message: 'Receipt schema 1.1 requires identity profile evidence' });
+  }
+  if (schema.minorVersion === 2 && (
+    action.identityAssurance !== 'execution_plan_exact'
+    || action.executionPlanHash === undefined
+    || action.identityEvidence !== undefined
+  )) {
+    context.addIssue({ code: 'custom', message: 'Receipt schema 1.2 requires an exact non-MCP execution plan identity' });
   }
   if (schema.minorVersion === 0 && action.identityAssurance === 'adapter_action_exact') {
     context.addIssue({ code: 'custom', message: 'Receipt schema 1.0 cannot claim exact adapter identity' });
@@ -525,6 +553,20 @@ function limitations(): z.infer<typeof LimitationsSchema> {
 }
 
 function coverageFor(boundary: ReceiptContext['boundary']): z.infer<typeof CoverageSchema> {
+  if (boundary === 'graph_genesis_plan') {
+    return {
+      routedThroughApg: true,
+      boundary,
+      observed: [
+        'exact_execution_envelope', 'local_approval', 'bounded_public_metadata_requests',
+        'exact_process_dispatch', 'bounded_post_state', 'candidate_artifact', 'terminal_audit',
+      ],
+      notObserved: [
+        'registry_publisher_honesty', 'package_safety', 'source_build_equivalence', 'kernel_integrity',
+        'same_user_containment', 'later_artifact_bytes', 'materialization', 'startup', 'direct_npm_npx',
+      ],
+    };
+  }
   if (boundary === 'install_guard_plan') {
     return {
       routedThroughApg: true,

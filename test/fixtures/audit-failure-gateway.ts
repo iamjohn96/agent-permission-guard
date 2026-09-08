@@ -8,6 +8,9 @@ const audit: AuditRecorder = {
   begin(context) {
     if (context.toolName === 'dangerous_write') throw new Error('fixture audit unavailable');
     return {
+      actionId: '00000000-0000-4000-8000-000000000000',
+      markAuthorized() {},
+      markExecutionStarted() {},
       markForwarding() {},
       markApprovalRequested() {},
       markApprovalResolved() {},
@@ -15,6 +18,7 @@ const audit: AuditRecorder = {
       markCompleted() {},
       markExecutionResult() {},
       markFailed() {},
+      appendEvidence() {},
     };
   },
 };

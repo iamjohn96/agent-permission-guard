@@ -79,6 +79,7 @@ describe('dashboard API security', () => {
         status: 'ok',
         api_version: 1,
         instance_id: dashboard.instanceId,
+        capabilities: ['approvals', 'audit', 'policy'],
       });
 
       const wrongOrigin = await fetch(`${url.origin}/api/approvals`, {

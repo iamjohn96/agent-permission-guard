@@ -24,6 +24,9 @@ import {
 const GENESIS_HASH = '0'.repeat(64);
 
 export interface AuditCall {
+  readonly actionId: string;
+  markAuthorized(): void;
+  markExecutionStarted(): void;
   markForwarding(): void;
   markApprovalRequested(request: ApprovalRequestView): void;
   markApprovalResolved(approvalId: string, outcome: ApprovalOutcome): void;
@@ -31,6 +34,7 @@ export interface AuditCall {
   markCompleted(result: CallToolResult): void;
   markExecutionResult(summary: unknown, isError: boolean): void;
   markFailed(code: string): void;
+  appendEvidence(eventType: string, details: unknown): void;
 }
 
 export interface AuditRecorder {
@@ -57,6 +61,9 @@ export type AuditDecision = Readonly<{
 export class NoopAuditRecorder implements AuditRecorder {
   begin(_context: ToolCallContext, _decision: AuditDecision): AuditCall {
     return {
+      actionId: '00000000-0000-4000-8000-000000000000',
+      markAuthorized() {},
+      markExecutionStarted() {},
       markForwarding() {},
       markApprovalRequested() {},
       markApprovalResolved() {},
@@ -64,6 +71,7 @@ export class NoopAuditRecorder implements AuditRecorder {
       markCompleted() {},
       markExecutionResult() {},
       markFailed() {},
+      appendEvidence() {},
     };
   }
 }
@@ -160,7 +168,48 @@ export class SqliteAuditRecorder implements AuditRecorder {
     };
 
     return {
+      actionId: id,
+      markAuthorized: () => {
+        if (receiptContext.boundary !== 'graph_genesis_plan') {
+          throw new Error('Separate authorization is reserved for Graph Genesis');
+        }
+        if (terminal || authorization !== undefined) throw new Error('Authorization is already finalized');
+        if (approval.required && approval.outcome !== 'approved') throw new Error('Required approval is not approved');
+        const timestamp = this.now().toISOString();
+        const nextAuthorization = buildAuthorization('authorized', 'approval_approved', timestamp);
+        this.database.transaction(() => {
+          this.updateStatus(id, 'authorized');
+          this.appendEvent(id, 'authorization_receipt_finalized', {
+            receipt: nextAuthorization.receipt,
+            receiptDigest: nextAuthorization.digest,
+          });
+          this.appendEvent(id, 'graph_genesis_authorization_ready', {
+            executionPlanHash: receiptContext.executionPlanHash,
+          });
+        })();
+        authorization = nextAuthorization;
+      },
+      markExecutionStarted: () => {
+        if (receiptContext.boundary !== 'graph_genesis_plan') {
+          throw new Error('Separate execution start is reserved for Graph Genesis');
+        }
+        if (terminal || dispatched || authorization === undefined) {
+          throw new Error('Graph Genesis is not ready for execution start');
+        }
+        const timestamp = this.now().toISOString();
+        this.database.transaction(() => {
+          this.updateStatus(id, 'forwarding');
+          this.appendEvent(id, 'execution_start_recorded', {
+            receiptDigest: authorization!.digest,
+          });
+        })();
+        executionStartedAt = timestamp;
+        dispatched = true;
+      },
       markForwarding: () => {
+        if (receiptContext.boundary === 'graph_genesis_plan') {
+          throw new Error('Graph Genesis requires separate authorization and execution-start records');
+        }
         if (terminal) throw new Error('Audit call is already terminal');
         if (dispatched) throw new Error('Execution dispatch is already recorded');
         if (approval.required && approval.outcome !== 'approved') {
@@ -295,10 +344,16 @@ export class SqliteAuditRecorder implements AuditRecorder {
           startedAt: executionStartedAt,
           terminalStatus: isError ? 'execution_error' : 'completed',
           completedAt: completedAt.toISOString(),
-          observedResult: summarizeInstallReceiptResult(summary, isError),
+          observedResult: summarizeExecutionReceiptResult(receiptContext, summary, isError),
         });
         this.database.transaction(() => {
           this.finish(id, isError ? 'execution_error' : 'completed', startedAt, completedAt, redactedSummary, undefined);
+          if (receiptContext.boundary === 'graph_genesis_plan') {
+            this.appendEvent(id, isError ? 'graph_genesis_incomplete' : 'graph_genesis_complete', {
+              executionPlanHash: receiptContext.executionPlanHash,
+              outcomeReceiptDigest: receiptDigest(outcome),
+            });
+          }
           this.appendEvent(id, 'execution_completed', redactedSummary);
           this.appendEvent(id, 'outcome_receipt_finalized', {
             receipt: outcome,
@@ -331,6 +386,12 @@ export class SqliteAuditRecorder implements AuditRecorder {
           : undefined;
         this.database.transaction(() => {
           this.finish(id, 'failed', startedAt, completedAt, undefined, code);
+          if (receiptContext.boundary === 'graph_genesis_plan') {
+            this.appendEvent(id, 'graph_genesis_incomplete', {
+              executionPlanHash: receiptContext.executionPlanHash,
+              code,
+            });
+          }
           this.appendEvent(id, 'execution_failed', { code });
           if (authorization === undefined) {
             this.appendEvent(id, 'authorization_receipt_finalized', {
@@ -347,6 +408,17 @@ export class SqliteAuditRecorder implements AuditRecorder {
         })();
         authorization = nextAuthorization;
         terminal = true;
+      },
+      appendEvidence: (eventType, details) => {
+        if (terminal) throw new Error('Audit call is already terminal');
+        if (!/^graph_genesis_[a-z0-9_]{1,64}$/u.test(eventType)) {
+          throw new Error('Graph Genesis evidence event type is invalid');
+        }
+        const safeDetails = redactForAudit(details);
+        if (Buffer.byteLength(canonicalJson(safeDetails), 'utf8') > 65_536) {
+          throw new Error('Graph Genesis evidence event exceeds the size limit');
+        }
+        this.database.transaction(() => this.appendEvent(id, eventType, safeDetails))();
       },
     };
   }
@@ -483,6 +555,44 @@ function summarizeInstallReceiptResult(summary: unknown, isError: boolean): Obse
   };
 }
 
+function summarizeExecutionReceiptResult(
+  context: ReceiptContext,
+  summary: unknown,
+  isError: boolean,
+): ObservedReceiptResult {
+  if (context.boundary !== 'graph_genesis_plan') return summarizeInstallReceiptResult(summary, isError);
+  const record = asRecord(summary);
+  const process = asRecord(record?.process);
+  const metadata = asRecord(record?.metadata);
+  const candidate = asRecord(record?.candidate);
+  const cleanup = asRecord(record?.cleanup);
+  const terminalAudit = asRecord(record?.terminalAudit);
+  const externalReadStatus = isGraphExternalReadStatus(metadata?.externalReadStatus)
+    ? metadata.externalReadStatus : undefined;
+  const executionStatus = isExecutionStatus(process?.status) ? process.status : undefined;
+  const cleanupStatus = isGraphCleanupStatus(cleanup?.status) ? cleanup.status : undefined;
+  const terminalAuditStatus = isGraphTerminalAuditStatus(terminalAudit?.status) ? terminalAudit.status : undefined;
+  return {
+    kind: 'graph_genesis',
+    isError,
+    ...(externalReadStatus === undefined ? {} : { externalReadStatus }),
+    ...(boundedNonNegativeInteger(metadata?.requestCount, 512) === undefined ? {} : { metadataRequestCount: metadata?.requestCount as number }),
+    ...(boundedNonNegativeInteger(metadata?.uniquePackageCount, 256) === undefined ? {} : { metadataUniquePackageCount: metadata?.uniquePackageCount as number }),
+    ...(boundedNonNegativeInteger(metadata?.responseBytes, 134_217_728) === undefined ? {} : { metadataResponseBytes: metadata?.responseBytes as number }),
+    ...(executionStatus === undefined ? {} : { executionStatus }),
+    ...(typeof process?.exitCode !== 'number' && process?.exitCode !== null ? {} : { exitCode: process.exitCode as number | null }),
+    ...(boundedNonNegativeInteger(process?.stdoutBytes, Number.MAX_SAFE_INTEGER) === undefined ? {} : { stdoutBytes: process?.stdoutBytes as number }),
+    ...(boundedNonNegativeInteger(process?.stderrBytes, Number.MAX_SAFE_INTEGER) === undefined ? {} : { stderrBytes: process?.stderrBytes as number }),
+    ...(isReceiptDigest(candidate?.lockDigest) ? { lockDigest: candidate.lockDigest } : {}),
+    ...(isReceiptDigest(candidate?.candidateDigest) ? { candidateDigest: candidate.candidateDigest } : {}),
+    ...(isReceiptDigest(candidate?.artifactDigest) ? { candidateArtifactDigest: candidate.artifactDigest } : {}),
+    ...(cleanupStatus === undefined ? {} : { cleanupStatus }),
+    ...(isReceiptDigest(cleanup?.quarantineReferenceDigest) ? { quarantineReferenceDigest: cleanup.quarantineReferenceDigest } : {}),
+    ...(terminalAuditStatus === undefined ? {} : { terminalAuditStatus }),
+    ...(typeof record?.errorCode === 'string' ? { errorCode: safeReasonCode(record.errorCode) } : {}),
+  };
+}
+
 function fallbackReceiptContext(context: ToolCallContext): ReceiptContext {
   return {
     adapter: 'mcp_proxy',
@@ -546,6 +656,7 @@ function blockedApproval(
 
 function receiptResultKind(context: ReceiptContext): ObservedReceiptResult['kind'] {
   if (context.boundary === 'install_guard_plan') return 'install';
+  if (context.boundary === 'graph_genesis_plan') return 'graph_genesis';
   if (context.boundary === 'mcp_proxy_call') return 'mcp';
   return 'generic';
 }
@@ -586,12 +697,29 @@ function isKnownInstallFile(value: unknown): value is 'package.json' | 'package-
   return value === 'package.json' || value === 'package-lock.json' || value === 'npm-shrinkwrap.json';
 }
 
+function isGraphExternalReadStatus(value: unknown): value is 'not_started' | 'started' | 'validated' | 'incomplete' {
+  return value === 'not_started' || value === 'started' || value === 'validated' || value === 'incomplete';
+}
+
+function isGraphCleanupStatus(value: unknown): value is 'not_needed' | 'complete' | 'quarantined' | 'incomplete' {
+  return value === 'not_needed' || value === 'complete' || value === 'quarantined' || value === 'incomplete';
+}
+
+function isGraphTerminalAuditStatus(value: unknown): value is 'complete' | 'failed' | 'unknown' {
+  return value === 'complete' || value === 'failed' || value === 'unknown';
+}
+
+function isReceiptDigest(value: unknown): value is string {
+  return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/u.test(value);
+}
+
 function terminalStatusForFailure(
   code: string,
-): 'upstream_error' | 'cancelled' | 'failed' | 'audit_failed' {
+): 'upstream_error' | 'cancelled' | 'failed' | 'audit_failed' | 'incomplete_external_read' {
   if (code === 'upstream_error') return 'upstream_error';
   if (code === 'cancelled') return 'cancelled';
   if (code.includes('audit_completion_failed')) return 'audit_failed';
+  if (code === 'incomplete_external_read') return 'incomplete_external_read';
   return 'failed';
 }
 

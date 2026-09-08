@@ -2,15 +2,15 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { request as httpsRequest, type RequestOptions as HttpsRequestOptions } from 'node:https';
-import { isIP, type LookupFunction } from 'node:net';
+import { isIP, type LookupFunction, type Socket } from 'node:net';
 
 import { canonicalJson } from '../audit/canonical-json.js';
 import { parseStrictJsonDocument } from './graph-genesis-broker.js';
 import type {
   AuthenticatedGraphGenesisExecutionCapsule,
+  AuthenticatedGraphGenesisStartLease,
   GraphGenesisAuditGate,
-  HardenedGraphGenesisAuthorization,
-  HardenedGraphGenesisAuthorizationVerifier,
+  GraphGenesisStartLeaseVerifier,
   HardenedGraphGenesisPlan,
   HardenedGraphGenesisPlanAuthority,
 } from './graph-genesis-hardening.js';
@@ -247,6 +247,9 @@ type BrokerSession = {
   readonly capsule: AuthenticatedGraphGenesisExecutionCapsule;
   readonly audit: GraphGenesisAuditGate;
   readonly transport: HardenedPublicMetadataTransport;
+  readonly startLease: AuthenticatedGraphGenesisStartLease;
+  readonly startLeaseVerifier: GraphGenesisStartLeaseVerifier;
+  readonly monotonicNow: () => number;
   readonly onFailure: () => void | Promise<void>;
   readonly controller: AbortController;
   readonly names: Set<string>;
@@ -261,37 +264,37 @@ type BrokerSession = {
 export class HardenedMetadataBrokerAuthority {
   readonly #sessions = new WeakSet<object>();
   readonly #ledgers = new WeakSet<object>();
-  readonly #usedAuthorizations = new WeakSet<object>();
+  readonly #preparedLeases = new WeakSet<object>();
 
   constructor(private readonly plans: HardenedGraphGenesisPlanAuthority) {}
 
   prepareSession(input: Readonly<{
     plan: HardenedGraphGenesisPlan;
     capsule: AuthenticatedGraphGenesisExecutionCapsule;
-    authorization: HardenedGraphGenesisAuthorization;
-    authorizationVerifier: HardenedGraphGenesisAuthorizationVerifier;
+    startLease: AuthenticatedGraphGenesisStartLease;
+    startLeaseVerifier: GraphGenesisStartLeaseVerifier;
     audit: GraphGenesisAuditGate;
     transport: HardenedPublicMetadataTransport;
     onFailure: () => void | Promise<void>;
     mode: 'production' | 'synthetic';
-    now?: Date;
+    monotonicNow: () => number;
   }>): object {
-    const now = input.now ?? new Date();
     if (!this.plans.authenticatesPair(input.plan, input.capsule)
-      || !input.authorizationVerifier.authenticatesAuthorization(input.authorization)
-      || this.#usedAuthorizations.has(input.authorization)
-      || input.authorization.planHash !== input.plan.planHash
-      || input.authorization.implementationKind !== input.mode
+      || !input.startLeaseVerifier.authenticatesStartLease(input.startLease, input.plan.planHash)
+      || this.#preparedLeases.has(input.startLease)
       || input.transport.implementationKind !== input.mode
-      || Date.parse(input.authorization.expiresAt) <= now.getTime()
       || input.audit.planHash !== input.plan.planHash
+      || !input.audit.events.includes('authorization_finalized')
       || (input.mode === 'production' && input.audit.implementationKind !== 'production')) failMetadata();
-    this.#usedAuthorizations.add(input.authorization);
+    this.#preparedLeases.add(input.startLease);
     const session: BrokerSession = {
       plan: input.plan,
       capsule: input.capsule,
       audit: input.audit,
       transport: input.transport,
+      startLease: input.startLease,
+      startLeaseVerifier: input.startLeaseVerifier,
+      monotonicNow: input.monotonicNow,
       onFailure: input.onFailure,
       controller: new AbortController(),
       names: new Set(),
@@ -309,7 +312,9 @@ export class HardenedMetadataBrokerAuthority {
   async arm(opaque: object): Promise<void> {
     const session = this.#session(opaque);
     if (session.state !== 'disarmed') failMetadata();
-    await session.audit.record('authorization_finalized');
+    if (!session.startLeaseVerifier.consumeStartLease(
+      session.startLease, 'broker_arm', session.monotonicNow(),
+    )) failMetadata();
     await session.audit.record('broker_armed');
     session.state = 'armed';
   }
@@ -444,13 +449,25 @@ export class HardenedLoopbackBrokerListener {
   #server: Server | undefined;
   #session: object | undefined;
   #port: number | undefined;
+  readonly #handlers = new Set<Promise<void>>();
+  readonly #sockets = new Set<Socket>();
+  #acceptedHandlerCount = 0;
 
   constructor(private readonly broker: HardenedMetadataBrokerAuthority) {}
 
   async listen(): Promise<number> {
     if (this.#server !== undefined) failMetadata();
     const server = createServer({ maxHeaderSize: 16 * 1024, requestTimeout: 5_000, headersTimeout: 5_000 },
-      (request, response) => { void this.#respond(request, response); });
+      (request, response) => {
+        this.#acceptedHandlerCount += 1;
+        const handler = this.#respond(request, response);
+        this.#handlers.add(handler);
+        void handler.finally(() => this.#handlers.delete(handler)).catch(() => undefined);
+      });
+    server.on('connection', (socket) => {
+      this.#sockets.add(socket);
+      socket.once('close', () => this.#sockets.delete(socket));
+    });
     server.keepAliveTimeout = 1;
     server.maxRequestsPerSocket = 1;
     server.maxHeadersCount = 32;
@@ -481,13 +498,43 @@ export class HardenedLoopbackBrokerListener {
   }
 
   async close(): Promise<void> {
+    await this.closeAndDrain();
+  }
+
+  async closeAndDrain(timeoutMs = 5_000): Promise<Readonly<{
+    acceptedHandlerCount: number;
+    outstandingHandlerCount: 0;
+    openSocketCount: 0;
+  }>> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) failMetadata();
     const server = this.#server;
     this.#server = undefined;
     this.#session = undefined;
     this.#port = undefined;
-    if (server === undefined) return;
-    server.closeAllConnections();
-    await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+    const acceptedHandlerCount = this.#acceptedHandlerCount;
+    this.#acceptedHandlerCount = 0;
+    if (server === undefined) {
+      if (this.#handlers.size !== 0 || this.#sockets.size !== 0) failMetadata();
+      return Object.freeze({ acceptedHandlerCount: 0, outstandingHandlerCount: 0, openSocketCount: 0 });
+    }
+    const closed = new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+    server.closeIdleConnections();
+    const drained = Promise.allSettled([...this.#handlers]).then(() => undefined);
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutHandle = setTimeout(() => reject(new PackageStageError('graph_metadata_incomplete')), timeoutMs);
+      timeoutHandle.unref();
+    });
+    try {
+      await Promise.race([Promise.all([closed, drained]), timeout]);
+    } catch (error) {
+      server.closeAllConnections();
+      throw error;
+    } finally {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    }
+    if (this.#handlers.size !== 0 || this.#sockets.size !== 0) failMetadata();
+    return Object.freeze({ acceptedHandlerCount, outstandingHandlerCount: 0, openSocketCount: 0 });
   }
 
   async #respond(request: IncomingMessage, response: ServerResponse): Promise<void> {

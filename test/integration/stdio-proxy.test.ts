@@ -238,7 +238,10 @@ it('rotates an opt-in dashboard state file without an older process removing new
     headers: { Authorization: `Bearer ${stateToken}` },
   });
   expect(health.status).toBe(200);
-  expect(await health.json()).toEqual({ status: 'ok', api_version: 1, instance_id: state.instance_id });
+  expect(await health.json()).toEqual({
+    status: 'ok', api_version: 1, instance_id: state.instance_id,
+    capabilities: ['approvals', 'audit', 'policy'],
+  });
 
   const staleCredential = await fetch(`${stateUrl.origin}/api/health`, {
     headers: { Authorization: `Bearer ${firstToken}` },

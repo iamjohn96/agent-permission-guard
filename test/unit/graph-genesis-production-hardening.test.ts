@@ -25,13 +25,13 @@ import {
   OwnedHostPlatformAuthority,
   OwnedRuntimeVersionAuthority,
   RuntimeFileSnapshotAuthority,
-  SyntheticHardenedGraphGenesisApprovalAuthority,
   computeWorkspaceBinding,
   type ContainmentProbeExecutor,
   type GraphGenesisDurableAuditSink,
   type HostPlatformProbeExecutor,
   type RuntimeVersionProbeExecutor,
 } from '../../src/stage/graph-genesis-hardening.js';
+import { SyntheticGraphGenesisStartLeaseAuthority } from '../../src/stage/graph-genesis-composition.js';
 import {
   BoundedNpmPublicMetadataTransport,
   createLocalTlsPinnedHttpsClientForTest,
@@ -89,6 +89,8 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
 
   it('revalidates the exact sealed runtime and workspace before spawn', async () => {
     const fixture = await planFixture();
+    const leaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(fixture.planAuthority);
+    const startLease = leaseAuthority.createForTest(fixture.prepared.plan, 10_000);
     writeFileSync(fixture.snapshots.brokerRuntime.absolutePath, 'substituted broker runtime');
     let spawnCalls = 0;
     const supervisor = new GraphGenesisProcessSupervisor(fixture.planAuthority, {
@@ -99,8 +101,9 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       plan: fixture.prepared.plan,
       capsule: fixture.prepared.capsule,
       audit: new GraphGenesisAuditGate(fixture.prepared.plan.planHash, new MemoryAuditSink()),
+      startLease, startLeaseVerifier: leaseAuthority, monotonicNow: () => 1,
       onFailure: () => undefined,
-      allowSynthetic: true,
+      mode: 'synthetic',
     })).rejects.toMatchObject({ code: 'artifact_plan_invalid' });
     expect(spawnCalls).toBe(0);
   });
@@ -242,13 +245,13 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     const session = fixture.broker.prepareSession({
       plan: fixture.plan.prepared.plan,
       capsule: fixture.plan.prepared.capsule,
-      authorization: fixture.authorization,
-      authorizationVerifier: fixture.approvals,
+      startLease: fixture.startLease,
+      startLeaseVerifier: fixture.leaseAuthority,
       audit: fixture.audit,
       transport,
       onFailure: () => undefined,
       mode: 'synthetic',
-      now: NOW,
+      monotonicNow: () => 1,
     });
     await fixture.broker.arm(session);
     const body = await fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/fixture`, {});
@@ -281,13 +284,13 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     const input = {
       plan: fixture.plan.prepared.plan,
       capsule: fixture.plan.prepared.capsule,
-      authorization: fixture.authorization,
-      authorizationVerifier: fixture.approvals,
+      startLease: fixture.startLease,
+      startLeaseVerifier: fixture.leaseAuthority,
       audit: fixture.audit,
       transport,
       onFailure: () => { failures += 1; },
       mode: 'synthetic' as const,
-      now: NOW,
+      monotonicNow: () => 1,
     };
     const session = fixture.broker.prepareSession(input);
     expect(() => fixture.broker.prepareSession(input)).toThrowError(expect.objectContaining({ code: 'graph_metadata_invalid' }));
@@ -318,15 +321,16 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       const before = await fetch(`http://127.0.0.1:${port}/not-armed`);
       expect(before.status).toBe(404);
       const plan = await planFixture({ files, trees, probes, versions, workspaces, hosts, planAuthority, brokerPort: port });
-      const approvals = new SyntheticHardenedGraphGenesisApprovalAuthority(planAuthority);
-      const authorization = approvals.authorizeForTest(plan.prepared.plan, '2026-09-08T00:05:00.000Z', NOW);
+      const leaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(planAuthority);
+      const startLease = leaseAuthority.createForTest(plan.prepared.plan, 10_000);
       const sink = new MemoryAuditSink();
       const audit = new GraphGenesisAuditGate(plan.prepared.plan.planHash, sink);
+      await audit.record('authorization_finalized');
       const session = broker.prepareSession({
-        plan: plan.prepared.plan, capsule: plan.prepared.capsule, authorization,
-        authorizationVerifier: approvals, audit,
+        plan: plan.prepared.plan, capsule: plan.prepared.capsule, startLease,
+        startLeaseVerifier: leaseAuthority, audit,
         transport: { implementationKind: 'synthetic', async fetchPackage(name) { return packument(name); } },
-        onFailure: () => undefined, mode: 'synthetic', now: NOW,
+        onFailure: () => undefined, mode: 'synthetic', monotonicNow: () => 1,
       });
       await broker.arm(session);
       listener.arm(session);
@@ -337,11 +341,15 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       expect(rejected.status).toBe(502);
       const afterFailure = await fetch(`http://127.0.0.1:${port}/${plan.routeToken}/fixture`);
       expect(afterFailure.status).toBe(404);
+      const drained = await listener.closeAndDrain();
+      expect(drained).toMatchObject({ outstandingHandlerCount: 0, openSocketCount: 0 });
+      expect(drained.acceptedHandlerCount).toBeGreaterThanOrEqual(4);
     } finally { await listener.close(); }
   });
 
   it('supervises only an authenticated capsule and records bounded terminal process evidence', async () => {
     const fixture = await planFixture();
+    const leaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(fixture.planAuthority);
     const sink = new MemoryAuditSink();
     const audit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, sink);
     const supervisor = new GraphGenesisProcessSupervisor(fixture.planAuthority, fakeSpawn('completed'));
@@ -349,8 +357,11 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       plan: fixture.prepared.plan,
       capsule: fixture.prepared.capsule,
       audit,
+      startLease: leaseAuthority.createForTest(fixture.prepared.plan, 10_000),
+      startLeaseVerifier: leaseAuthority,
+      monotonicNow: () => 1,
       onFailure: () => undefined,
-      allowSynthetic: true,
+      mode: 'synthetic',
     });
     expect(supervisor.authenticates(result)).toBe(true);
     expect(result).toMatchObject({ status: 'completed', exitCode: 0, childClosed: true });
@@ -360,21 +371,27 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
 
     const overflowAudit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, new MemoryAuditSink());
     const overflow = new GraphGenesisProcessSupervisor(fixture.planAuthority, fakeSpawn('overflow'));
+    const overflowLeaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(fixture.planAuthority);
     const overflowResult = await overflow.run({
       plan: fixture.prepared.plan, capsule: fixture.prepared.capsule, audit: overflowAudit,
-      onFailure: () => undefined, allowSynthetic: true,
+      startLease: overflowLeaseAuthority.createForTest(fixture.prepared.plan, 10_000),
+      startLeaseVerifier: overflowLeaseAuthority, monotonicNow: () => 1,
+      onFailure: () => undefined, mode: 'synthetic',
     });
     expect(overflowResult.status).toBe('output_overflow');
   });
 
   it('fails closed when durable terminal audit persistence fails', async () => {
     const fixture = await planFixture();
+    const leaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(fixture.planAuthority);
     const audit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, new FailingAuditSink('npm_terminal_observed'));
     const supervisor = new GraphGenesisProcessSupervisor(fixture.planAuthority, fakeSpawn('completed'));
     let failures = 0;
     await expect(supervisor.run({
       plan: fixture.prepared.plan, capsule: fixture.prepared.capsule, audit,
-      onFailure: () => { failures += 1; }, allowSynthetic: true,
+      startLease: leaseAuthority.createForTest(fixture.prepared.plan, 10_000),
+      startLeaseVerifier: leaseAuthority, monotonicNow: () => 1,
+      onFailure: () => { failures += 1; }, mode: 'synthetic',
     })).rejects.toMatchObject({ code: 'stage_audit_incomplete' });
     expect(failures).toBe(1);
   });
@@ -398,23 +415,25 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
 
   it('authenticates completion only after process, broker, candidate, cleanup and ordered audit all agree', async () => {
     const fixture = await planFixture();
-    const approvals = new SyntheticHardenedGraphGenesisApprovalAuthority(fixture.planAuthority);
-    const authorization = approvals.authorizeForTest(fixture.prepared.plan, '2026-09-08T00:05:00.000Z', NOW);
+    const leaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(fixture.planAuthority);
+    const startLease = leaseAuthority.createForTest(fixture.prepared.plan, 10_000);
     const sink = new MemoryAuditSink();
     const audit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, sink);
+    await audit.record('authorization_finalized');
     const broker = new HardenedMetadataBrokerAuthority(fixture.planAuthority);
     const session = broker.prepareSession({
-      plan: fixture.prepared.plan, capsule: fixture.prepared.capsule, authorization,
-      authorizationVerifier: approvals, audit,
+      plan: fixture.prepared.plan, capsule: fixture.prepared.capsule, startLease,
+      startLeaseVerifier: leaseAuthority, audit,
       transport: { implementationKind: 'synthetic', async fetchPackage(name) { return packument(name); } },
-      onFailure: () => undefined, mode: 'synthetic', now: NOW,
+      onFailure: () => undefined, mode: 'synthetic', monotonicNow: () => 1,
     });
     await broker.arm(session);
     const child = controlledSpawn();
     const supervisor = new GraphGenesisProcessSupervisor(fixture.planAuthority, child.adapter);
     const processPromise = supervisor.run({
       plan: fixture.prepared.plan, capsule: fixture.prepared.capsule, audit,
-      onFailure: () => undefined, allowSynthetic: true,
+      startLease, startLeaseVerifier: leaseAuthority, monotonicNow: () => 1,
+      onFailure: () => undefined, mode: 'synthetic',
     });
     await waitUntil(() => sink.events.some((event) => event.name === 'npm_spawn_started'));
     await broker.handle(session, 'GET', `/${fixture.routeToken}/@modelcontextprotocol%2fserver-filesystem`, {});
@@ -575,11 +594,12 @@ async function planFixture(options: Readonly<{
 async function brokerFixture(overrides: Partial<ReturnType<typeof limits>['broker']> = {}) {
   const brokerLimits = { ...limits().broker, ...overrides };
   const plan = await planFixture({ brokerLimits });
-  const approvals = new SyntheticHardenedGraphGenesisApprovalAuthority(plan.planAuthority);
-  const authorization = approvals.authorizeForTest(plan.prepared.plan, '2026-09-08T00:05:00.000Z', NOW);
+  const leaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(plan.planAuthority);
+  const startLease = leaseAuthority.createForTest(plan.prepared.plan, 10_000);
   const sink = new MemoryAuditSink();
   const audit = new GraphGenesisAuditGate(plan.prepared.plan.planHash, sink);
-  return { plan, approvals, authorization, sink, audit, broker: new HardenedMetadataBrokerAuthority(plan.planAuthority) };
+  await audit.record('authorization_finalized');
+  return { plan, leaseAuthority, startLease, sink, audit, broker: new HardenedMetadataBrokerAuthority(plan.planAuthority) };
 }
 
 function limits() {

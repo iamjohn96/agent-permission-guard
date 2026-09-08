@@ -20,16 +20,21 @@ export type DashboardHandle = Readonly<{
 export async function startDashboard(options: Readonly<{
   approvals: ApprovalCoordinator;
   audit: AuditQueryService;
-  auditRecorder: SqliteAuditRecorder;
-  policies: LivePolicyController;
+  auditRecorder?: SqliteAuditRecorder;
+  policies?: LivePolicyController;
   token: string;
   port?: number;
+  mode?: 'full' | 'approval_audit_only';
 }>): Promise<DashboardHandle> {
   if (options.token.length < 32) throw new Error('Dashboard token must be at least 32 characters');
+  const mode = options.mode ?? 'full';
+  if (mode === 'full' && (options.auditRecorder === undefined || options.policies === undefined)) {
+    throw new Error('Full Dashboard mode requires policy and audit services');
+  }
   const instanceId = randomUUID();
   const assets = loadAssets();
   const server = createServer((request, response) => {
-    void handleRequest(request, response, { ...options, instanceId }, assets, server.address()).catch((error: unknown) => {
+    void handleRequest(request, response, { ...options, mode, instanceId }, assets, server.address()).catch((error: unknown) => {
       if (error instanceof DashboardHttpError) return sendJson(response, error.status, { error: error.message });
       if (error instanceof PolicyConflictError) return sendJson(response, 409, { error: error.message });
       if (error instanceof PolicyLoadError) return sendJson(response, 400, { error: error.message });
@@ -73,10 +78,11 @@ async function handleRequest(
   services: Readonly<{
     approvals: ApprovalCoordinator;
     audit: AuditQueryService;
-    auditRecorder: SqliteAuditRecorder;
-    policies: LivePolicyController;
+    auditRecorder?: SqliteAuditRecorder;
+    policies?: LivePolicyController;
     token: string;
     instanceId: string;
+    mode: 'full' | 'approval_audit_only';
   }>,
   assets: Assets,
   address: ReturnType<ReturnType<typeof createServer>['address']>,
@@ -95,7 +101,12 @@ async function handleRequest(
     if (!isAuthorized(request.headers.authorization, services.token)) return sendJson(response, 401, { error: 'Unauthorized' });
 
     if (request.method === 'GET' && url.pathname === '/api/health') {
-      return sendJson(response, 200, { status: 'ok', api_version: 1, instance_id: services.instanceId });
+      return sendJson(response, 200, {
+        status: 'ok',
+        api_version: 1,
+        instance_id: services.instanceId,
+        capabilities: services.mode === 'full' ? ['approvals', 'audit', 'policy'] : ['approvals', 'audit'],
+      });
     }
     if (request.method === 'GET' && url.pathname === '/api/approvals') {
       return sendJson(response, 200, { approvals: services.approvals.listPending() });
@@ -108,9 +119,13 @@ async function handleRequest(
       return sendJson(response, 200, services.audit.listRecent(limit));
     }
     if (request.method === 'GET' && url.pathname === '/api/policy') {
+      if (services.mode !== 'full' || services.policies === undefined) return sendJson(response, 404, { error: 'Not found' });
       return sendJson(response, 200, services.policies.getView());
     }
     if (request.method === 'PUT' && url.pathname === '/api/policy') {
+      if (services.mode !== 'full' || services.policies === undefined || services.auditRecorder === undefined) {
+        return sendJson(response, 404, { error: 'Not found' });
+      }
       const body = await readJsonBody(request);
       if (!isPolicyUpdate(body)) return sendJson(response, 400, { error: 'Expected policy source and revision' });
       const auditCall = services.auditRecorder.begin({

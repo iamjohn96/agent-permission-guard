@@ -5,6 +5,8 @@ import { canonicalJson } from '../audit/canonical-json.js';
 
 import type {
   AuthenticatedGraphGenesisExecutionCapsule,
+  AuthenticatedGraphGenesisStartLease,
+  GraphGenesisStartLeaseVerifier,
   GraphGenesisAuditGate,
   HardenedGraphGenesisPlan,
   HardenedGraphGenesisPlanAuthority,
@@ -58,19 +60,34 @@ export class GraphGenesisProcessSupervisor {
     plan: HardenedGraphGenesisPlan;
     capsule: AuthenticatedGraphGenesisExecutionCapsule;
     audit: GraphGenesisAuditGate;
+    startLease: AuthenticatedGraphGenesisStartLease;
+    startLeaseVerifier: GraphGenesisStartLeaseVerifier;
+    monotonicNow: () => number;
     onFailure: () => void | Promise<void>;
     signal?: AbortSignal;
-    allowSynthetic?: boolean;
+    mode: 'production' | 'synthetic';
   }>): Promise<AuthenticatedGraphGenesisProcessResult> {
     if (!this.plans.authenticatesPair(input.plan, input.capsule)
       || input.audit.planHash !== input.plan.planHash
-      || (!input.allowSynthetic && !NODE_SPAWN_ADAPTERS.has(this.spawnAdapter))) failProcess();
-    if (input.signal?.aborted === true) {
+      || !input.startLeaseVerifier.authenticatesStartLease(input.startLease, input.plan.planHash)
+      || this.spawnAdapter.implementationKind !== input.mode
+      || (input.mode === 'production' && !NODE_SPAWN_ADAPTERS.has(this.spawnAdapter))) failProcess();
+    if (isAborted(input.signal)) {
       await safeFailure(input);
       return this.#result(input.plan, 'cancelled', null, undefined, 0, 0);
     }
     await this.plans.revalidatePair(input.plan, input.capsule);
+    if (isAborted(input.signal)) {
+      await safeFailure(input);
+      return this.#result(input.plan, 'cancelled', null, undefined, 0, 0);
+    }
     await input.audit.record('npm_spawn_intent_recorded');
+    if (isAborted(input.signal) || !input.startLeaseVerifier.consumeStartLease(
+      input.startLease, 'process_spawn', input.monotonicNow(),
+    )) {
+      await safeFailure(input);
+      failProcess();
+    }
     let child: ChildProcess;
     try { child = this.spawnAdapter.spawn(input.capsule); } catch {
       await safeFailure(input);
@@ -205,5 +222,7 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 function digest(value: unknown): string {
   return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
+
+function isAborted(signal: AbortSignal | undefined): boolean { return signal?.aborted === true; }
 
 function failProcess(): never { throw new PackageStageError('artifact_plan_invalid'); }

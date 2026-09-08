@@ -47,7 +47,7 @@ export const PortableReceiptEnvelopeSchema = z.object({
   format: z.object({
     name: z.literal('apg-portable-evidence'),
     majorVersion: z.literal(1),
-    minorVersion: z.union([z.literal(0), z.literal(1)]),
+    minorVersion: z.union([z.literal(0), z.literal(1), z.literal(2)]),
     canonicalization: z.literal('apg-canonical-json-v1'),
   }).strict(),
   actionId: z.uuid(),
@@ -271,7 +271,7 @@ function receiptEnvelope(
 function baseEnvelope(
   actionId: string,
   completeness: PortableReceiptEnvelope['completeness'],
-  minorVersion: 0 | 1,
+  minorVersion: 0 | 1 | 2,
 ): Omit<PortableReceiptEnvelope, 'localEvidence'> {
   return {
     format: {
@@ -387,6 +387,7 @@ function digestEquals(left: string, right: string): boolean {
 
 function isIncompleteOutcome(receipt: OutcomeReceipt): boolean {
   return receipt.execution.terminalStatus === 'audit_failed'
+    || receipt.execution.terminalStatus === 'incomplete_external_read'
     || receipt.execution.terminalStatus === 'outcome_unknown_after_interruption';
 }
 
