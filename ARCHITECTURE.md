@@ -268,3 +268,27 @@ No production HTTPS adapter, built-in Filesystem graph, CLI, durable audit schem
 stage, or package process is connected. Real graph genesis, metadata confirmation, artifact download,
 production registration, materialization, startup, and MCP actions remain independent approval boundaries.
 See `docs/exact-production-graph-profile-read-only-artifact-acceptance-architecture-check.md`.
+
+## Bounded Metadata-only Graph Genesis Foundation
+
+The first exact production-graph candidate may be generated only for
+`@modelcontextprotocol/server-filesystem@2026.7.10` by exact npm `11.16.0` inside a disposable private
+workspace. A complete plan binds the Node/npm runtime trees, exact executables, OS/provider/profile,
+workspace identities, one loopback broker port and route digest, immutable launch vector, empty-built
+environment, target, and resource ceilings. Approval is one-time and cannot be reused to re-arm a broker.
+
+Node's Boolean `--allow-net` permission is insufficient to scope a destination. The development-only macOS
+provider layers a generated Seatbelt profile that permits one exact IPv4 loopback port with Node filesystem
+and process permissions. A fresh same-plan positive/negative local-only probe is mandatory; absence or drift
+blocks with no unsandboxed fallback. This is not a production sandbox claim.
+
+The metadata broker begins disarmed and owns URL construction. It accepts only one canonical anonymous
+packument GET grammar, never a tarball endpoint, forwards no inbound credentials or general headers, rejects
+redirect/status/type/UTF-8/JSON/name/size/deadline failures, and retains only a bounded safe digest ledger.
+The current implementation has only an injected fake transport and no production HTTP/HTTPS adapter.
+
+After a synthetic run, exact workspace validation, the existing closed lock compiler, verified cleanup, and
+ordered terminal audit are all required before controlled-genesis evidence is authenticated. A compiler-owned
+candidate alone has no production authority. Real npm, public metadata egress, exact metadata confirmation,
+artifact download, registration, materialization, startup, and MCP action remain separate approvals. See
+`docs/bounded-metadata-only-graph-genesis-architecture-check.md`.

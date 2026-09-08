@@ -2,11 +2,12 @@
 
 ## Current Milestone
 
-The Exact Production Graph Profile & Read-only Artifact Acceptance Architecture Check was accepted on
-2026-09-08 for a network-free foundation. Candidate/profile authority separation, closed synthetic lock
-compilation, fake-transport metadata confirmation, exact one-time artifact plans, private descriptor-backed
-artifact files, worker protocol v2 manifest evidence, double Pass A, bounded package-manifest projection,
-synthetic audit/report state, and test-only human-review promotion are implemented and verified locally.
+The Bounded Metadata-only Graph Genesis Architecture Check was accepted on 2026-09-08 and its network-free
+foundation is implemented locally. Exact npm `11.16.0` remains a development-only layout generator behind
+an APG loopback metadata broker; Node `26.3.1` cannot enforce loopback-only networking by itself. The first
+provider is an exact-build, fail-closed, development-only macOS Seatbelt profile layered with Node
+filesystem/process permissions. No npm command, broker egress, registry request, or real candidate generation
+has occurred.
 
 The exact parser plus bounded worker/two-pass POSIX materializer foundation is committed and pushed at
 `46497f9`. All archive work to date used repository-owned synthetic bytes and disposable private
@@ -160,12 +161,30 @@ stage, receipt/database change, or staged package startup has occurred in the cu
     exact cleanup, and synthetic terminal evidence precede test-only profile promotion
   - no registry request, npm graph generation, real artifact, materialization, persistent stage, DB change,
     CLI integration, package startup, or production profile registration
+- Exact Production Graph Read-only Acceptance foundation committed and pushed at `b1d4fe5`
+- Bounded Metadata-only Graph Genesis Architecture Check accepted on 2026-09-08
+- Network-free Bounded Metadata-only Graph Genesis foundation implemented locally:
+  - bounded exact runtime-tree snapshots with path, identity, mode, size, content, symlink, collision,
+    hardlink, special-file, world-write, entry-count, and byte-limit checks
+  - private workspace creation with protected-file identities, exact synthetic pre/post state, archive/content
+    rejection, bounded no-follow reads, exact-root cleanup, and cleanup authority
+  - generated one-port macOS Seatbelt development profile and successful repo-owned local-only containment
+    probe across approved/alternate/non-loopback/IPv6 destinations plus Node write/process/worker/addon denial
+  - immutable exact npm command/environment builder without shell, inherited PATH/config/proxy/auth state,
+    npm execution, or production process runner
+  - one-time plan/approval brands that bind runtime, workspace, containment, broker, route, target, launch,
+    resource limits, and reject forgery/replay/substitution
+  - injected fake packument transport with closed canonical route, owned public URL construction, no header
+    forwarding, strict bounded JSON/name validation, deadline/aggregate/concurrency limits, and safe digest ledger
+  - synthetic exact lock compiler handoff; controlled completion requires genuine authorization, complete broker
+    ledger, exact workspace cleanup, and authenticated ordered terminal audit
+  - full network-free regression: 226 passed, 3 skipped
 
 ## In Progress
 
-- The network-free Exact Production Graph Profile & Read-only Artifact Acceptance foundation is complete
-  locally and awaiting commit/push approval. Real graph genesis, metadata reads, artifact downloads,
-  production registration, materialization, and startup remain separate approval boundaries.
+- Prepare the Exact Real Metadata-only Graph Genesis plan from fresh host/runtime/workspace/broker/provider
+  snapshots. Real npm launch and broker registry egress require a separate exact one-time approval; subsequent
+  metadata confirmation and artifact phases remain independent approval boundaries.
 
 ## Remaining
 
@@ -247,6 +266,11 @@ stage, receipt/database change, or staged package startup has occurred in the cu
   network-free interfaces but no production HTTPS implementation or built-in Filesystem graph. Synthetic
   acceptance does not establish publisher identity, source/build equivalence, maliciousness, sandboxing,
   materialized-tree integrity, launch readiness, or protection for direct npm/npx bypasses.
+- Metadata-only graph genesis remains foundation-only. The broker has no production listener or HTTPS
+  transport and the workflow has not run npm or contacted the registry. Its macOS Seatbelt provider is a
+  deprecated/private, exact-host development mechanism, not a supported production sandbox; every real plan
+  must repeat the complete local-only containment probe and fail closed on any drift or unavailable negative
+  test. Node's `--allow-net` remains broad without that provider.
 - Node's Permission Model is defense in depth, not a malicious-code security boundary. Node 24 has no
   network permission gate, and standard Node filesystem APIs cannot eliminate same-user
   intermediate-component races. The proposed architecture therefore blocks unsupported real-worker

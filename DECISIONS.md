@@ -346,3 +346,31 @@ equivalence, maliciousness, sandboxing, or runtime safety.
 
 Revisit If: A second runtime/platform profile is proposed, resumable acceptance is needed, provenance or
 signing evidence is added, or persistent materialization/startup becomes eligible for separate review.
+
+## Metadata-only graph genesis requires one-port containment and separate completion authority
+
+Date: 2026-09-08
+
+Context: The closed production-graph compiler needs a real npm-generated lock layout, but npm graph
+resolution normally has broad filesystem and network behavior. Node 26 can grant or deny network as a whole
+but cannot restrict it to an APG loopback broker.
+
+Decision: Limit the first development workflow to exact npm `11.16.0` and exact Filesystem package version.
+Bind runtime trees, private workspace identities, launch vector, environment, broker route, resource limits,
+macOS build, Seatbelt binary/profile, and fresh local-only containment evidence into one plan. Permit only
+canonical anonymous packument reads through an APG-owned broker. Keep compiler candidate, broker ledger,
+cleanup, audit, and controlled-completion authority separate. Do not provide unsandboxed fallback.
+
+Alternatives: Give npm unrestricted `--allow-net`; rely on proxy variables or HTTP monkey patches; implement
+a second npm resolver; reuse a user lock/cache; treat deprecated Seatbelt as a supported production sandbox.
+
+Reason: Exact layout generation requires npm behavior, but neither a lock digest nor credential stripping
+proves that npm stayed on the intended metadata-only route. Separate brands and fresh containment observations
+make every promotion precondition explicit and fail closed.
+
+Trade-offs: Seatbelt is deprecated/private and this provider is one-host development-only. A real run still
+requires public package-name disclosure, fresh exact-plan approval, and later independent metadata, artifact,
+registration, materialization, and startup decisions.
+
+Revisit If: Apple supplies a supported destination-scoped process sandbox, Node adds host/port network
+permissions, another OS/provider is proposed, or npm's lock-only behavior/capabilities change.
