@@ -2,12 +2,11 @@
 
 ## Current Milestone
 
-The Bounded Metadata-only Graph Genesis Architecture Check was accepted on 2026-09-08 and its network-free
-foundation is implemented locally. Exact npm `11.16.0` remains a development-only layout generator behind
-an APG loopback metadata broker; Node `26.3.1` cannot enforce loopback-only networking by itself. The first
-provider is an exact-build, fail-closed, development-only macOS Seatbelt profile layered with Node
-filesystem/process permissions. No npm command, broker egress, registry request, or real candidate generation
-has occurred.
+The Exact Real Metadata-only Graph Genesis Plan Architecture Check was accepted on 2026-09-08 and its
+network-free production-adapter hardening is implemented and verified locally. The checkpoint separates the
+safe plan from its private execution capsule and closes the owned runtime/probe/workspace, concurrent broker,
+pinned HTTPS, process supervision, strict post-state, no-follow cleanup, ordered audit, and final completion
+authority gaps. No public DNS/registry request or real npm launch has occurred.
 
 The exact parser plus bounded worker/two-pass POSIX materializer foundation is committed and pushed at
 `46497f9`. All archive work to date used repository-owned synthetic bytes and disposable private
@@ -179,12 +178,30 @@ stage, receipt/database change, or staged package startup has occurred in the cu
   - synthetic exact lock compiler handoff; controlled completion requires genuine authorization, complete broker
     ledger, exact workspace cleanup, and authenticated ordered terminal audit
   - full network-free regression: 226 passed, 3 skipped
+- Exact Real Metadata-only Graph Genesis Plan Architecture Check accepted on 2026-09-08
+- Network-free Graph Genesis production-adapter hardening implemented locally:
+  - safe immutable approval projection and plan are separated from the memory-only route/path capsule
+  - authority-owned exact file/tree snapshots, Node/npm version observation, finalized workspace, local-only
+    Seatbelt probe, and spawn-time full revalidation reject drift and caller-shaped evidence
+  - exact disarmed loopback listener and anonymous public-registry transport enforce canonical routes,
+    fixed headers, DNS deadline/classification, pinned socket address, npm hostname TLS, and streaming limits
+  - broker limits are atomically reserved before dispatch; first failure aborts the session, disarms local
+    traffic, rejects late results, and prevents approval replay or terminal ledger authentication
+  - shell-free private-capsule supervision bounds time/output, TERM/KILL escalation, child close, and audit
+    failures without retaining raw output
+  - strict no-follow post-state evidence rejects unknown/link/executable/archive residue and binds the exact
+    private lock document to the closed candidate compiler
+  - final completion requires matching process, ledger, post-state, candidate, cleanup, and ordered terminal
+    audit evidence for one exact plan
+  - no dependency, product database, CLI, policy, Dashboard, registry, artifact, or package execution change
+  - full network-free regression: 242 passed, 3 skipped
 
 ## In Progress
 
-- Prepare the Exact Real Metadata-only Graph Genesis plan from fresh host/runtime/workspace/broker/provider
-  snapshots. Real npm launch and broker registry egress require a separate exact one-time approval; subsequent
-  metadata confirmation and artifact phases remain independent approval boundaries.
+- Network-free production-adapter hardening is complete but uncommitted. The next proposed work is an Exact
+  Local Graph Genesis Plan Capture & Preflight Architecture Check. It may prepare concrete host-bound plan
+  evidence and run only the owned local containment/version preflight; real npm and public DNS/registry
+  access remain a later one-time approval boundary.
 
 ## Remaining
 
@@ -287,7 +304,17 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Tests
 
-- Current final network-free local suite with one worker: 218 passed, 3 skipped on 2026-09-08.
+- Current final network-free local suite: 242 passed, 3 skipped on 2026-09-08.
+- Production-adapter hardening focused coverage: 16 passed across public-plan/private-capsule separation,
+  authority-owned runtime/version/workspace/probe evidence, runtime drift with zero spawn, public/private and
+  mixed DNS classification, pinned transport construction, durable request-before-transport ordering,
+  concurrent reservation/session abort, disarmed exact loopback routing, supervised terminal/output/audit
+  failure, strict post-state/candidate binding, no-follow cleanup/quarantine, all-authority completion, and a
+  real local-only macOS Seatbelt/Node containment probe plus memory-only local TLS hostname/streaming checks.
+- Metadata-only graph genesis focused coverage: 8 passed across runtime/workspace identity, exact launch,
+  plan/approval/ledger/audit authority forgery and replay, canonical broker routing, redirect/JSON/deadline
+  failures, internal/escaping symlinks, post-state substitution, controlled compiler handoff, exact cleanup,
+  and a real local-only macOS Seatbelt/Node permission probe with no public destination.
 - Exact production graph/read-only acceptance focused coverage: 6 passed. Cases cover candidate authority
   forgery, unsupported/unreachable/cyclic locks, exact Node ancestor resolution, metadata mismatch,
   metadata/artifact deadlines, one-time approval replay, private artifact streaming, two fresh descriptor-backed Pass-A workers,
@@ -343,6 +370,14 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Current Risks
 
+- The production-shaped listener, transport, supervisor, post-state, cleanup, and completion authorities have
+  network-free evidence but have not performed one real combined npm/registry run.
+- The existing product SQLite audit chain is not yet connected as the production Graph Genesis audit sink;
+  audit persistence failure is fail-closed in tests, but the exact adapter and payload review remain blockers.
+- Seatbelt remains a deprecated/private, exact-host development mechanism. It must pass a fresh complete
+  local-only probe for each plan; there is no fallback, cross-platform claim, or hostile same-user defense.
+- DNS classification and npm-hostname TLS reduce destination substitution but do not prove registry honesty,
+  publisher identity, source/build equivalence, or that a locally trusted root was uncompromised.
 - A future lifecycle script or npx executable can perform effects outside the working directory without an OS sandbox.
 - Post-execution audit failure cannot undo a completed local side effect.
 - Automatic rollback cannot reliably reverse lifecycle scripts, child processes, cache changes, or external requests.
@@ -350,9 +385,9 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Next Recommended Task
 
-Review and accept or revise
-`docs/exact-production-graph-profile-read-only-artifact-acceptance-architecture-check.md`. If accepted,
-implement only its network-free schema, authority, fake-transport, descriptor-worker, double-Pass-A,
-manifest-projection, and synthetic evidence foundation. Do not run npm/npx, access a live registry,
-download a real artifact, register a production profile, create a persistent stage, change receipts or
-database schema, or start package code until the corresponding later action receives separate approval.
+First review and, if approved, commit/push the completed network-free hardening. Then prepare an Exact Local
+Graph Genesis Plan Capture & Preflight Architecture Check covering production composition, durable audit
+adapter shape, exact temporary roots, fresh runtime/version/containment capture, abort coupling, and the safe
+approval projection. Do not run real npm/npx, resolve public DNS, access a live registry, write the product
+audit database, download an artifact, register a profile, materialize a stage, or start package code until
+the corresponding later action receives separate approval.

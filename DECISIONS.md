@@ -374,3 +374,32 @@ registration, materialization, and startup decisions.
 
 Revisit If: Apple supplies a supported destination-scoped process sandbox, Node adds host/port network
 permissions, another OS/provider is proposed, or npm's lock-only behavior/capabilities change.
+
+## Real graph genesis requires a private capsule and an all-authority completion join
+
+Date: 2026-09-08
+
+Context: The metadata-only foundation correctly modeled the intended workflow but still allowed raw route
+material in its plan, caller-shaped runtime/probe evidence, concurrent budget races, and isolated success
+artifacts that were not yet joined by one production-shaped authority.
+
+Decision: Keep the approval projection and public plan free of raw tokens and private paths; place those only
+in a memory-only authenticated capsule. Fix production or synthetic providers at authority construction,
+snapshot and revalidate all runtime/workspace inputs, reserve broker limits before external-read-shaped work,
+abort the whole session on first failure, and require exact process, ledger, inspected lock, compiler,
+cleanup, and ordered audit evidence for the same plan before authenticating completion.
+
+Alternatives: Serialize the private launch vector as the plan; trust caller-provided digests or probe
+booleans; count only completed requests; accept successful npm exit or lock compilation as sufficient;
+perform broad recursive cleanup.
+
+Reason: An exact digest is meaningful only when the enforcing authority owns what was observed, and no
+single local success proves the complete external-read and cleanup transaction.
+
+Trade-offs: The implementation is intentionally target/runtime/platform-specific, rejects mixed DNS sets and
+unexpected npm behavior, retains private residue on ambiguous cleanup, and still cannot defend against a
+privileged or hostile same-user actor. A real run still requires a fresh exact plan, production durable audit
+adapter, and separately approved public egress.
+
+Revisit If: A supported destination-scoped sandbox replaces Seatbelt, the target/runtime changes, a signed
+receipt or external anchor is added, or the resolver/registry trust model changes.

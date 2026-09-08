@@ -292,3 +292,27 @@ ordered terminal audit are all required before controlled-genesis evidence is au
 candidate alone has no production authority. Real npm, public metadata egress, exact metadata confirmation,
 artifact download, registration, materialization, startup, and MCP action remain separate approvals. See
 `docs/bounded-metadata-only-graph-genesis-architecture-check.md`.
+
+## Metadata-only Graph Genesis Production-adapter Hardening
+
+The real-run boundary uses a safe immutable plan plus a separate memory-only execution capsule. Runtime file
+and tree snapshots, Node/npm versions, finalized workspace contents, containment observations, broker
+reservations, process terminal state, strict post-state, cleanup, and terminal audit are owned by separate
+authorities. The final completion authority authenticates only when every branded result agrees on the same
+plan and the candidate was compiled from the exact privately inspected lock document.
+
+The production-shaped transport resolves only `registry.npmjs.org`, rejects any mixed or non-public address
+set, pins one accepted socket address while preserving npm hostname TLS verification, sends only fixed
+anonymous headers, refuses redirects/decompression, and applies one absolute DNS-plus-response deadline and
+streaming byte ceiling. The local listener binds exact `127.0.0.1`, starts disarmed, accepts one canonical GET
+grammar, and disarms the session on malformed or failed authorized traffic.
+
+The process supervisor has no general command API. It revalidates the complete authority-owned runtime and
+initial workspace before durable spawn intent, launches only the matching private capsule with no shell or
+inherited environment, bounds output and time, and requires child close after TERM/KILL. Post-state rejects
+unknown roots, links, hardlinks, executables, archive residue, manifest substitution, and budget excess.
+Cleanup inventories and removes only the exact private tree and quarantines ambiguity.
+
+This remains a development-host foundation. It has not run real npm or public DNS/registry traffic, and the
+local Seatbelt provider is not a supported production sandbox. See
+`docs/exact-real-metadata-only-graph-genesis-plan-architecture-check.md`.
