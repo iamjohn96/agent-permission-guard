@@ -1,8 +1,11 @@
 # Exact Production Graph Genesis Live Run Readiness Architecture Check
 
 Status: accepted on 2026-09-09; initial readiness foundation committed at `7c15130`; production owner and
-synthetic full-flow implementation committed and pushed at `592b286`. A pre-spawn cancellation classification
-correction is local and uncommitted. No production live run has occurred.
+synthetic full-flow implementation committed and pushed at `592b286`; the pre-spawn cancellation classification
+correction is committed and pushed at `31fd835`. One disposable first command attempt expired at Dashboard approval before
+external read, npm, candidate output or package effect; its disarmed broker listener left the process live.
+The local uncommitted correction drains that listener before Dashboard teardown. No approved external execution
+has occurred.
 Architecture-check baseline: `6108936` (`feat: add production graph genesis composition`).
 Production-owner implementation baseline: `7c15130` (`feat: add fail-closed graph genesis readiness`).
 

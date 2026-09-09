@@ -9,6 +9,7 @@ import { createServer as createHttpsServer, type Server as HttpsServer } from 'n
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { LocalApprovalService } from '../../src/approval/service.js';
 import { ExactGraphCandidateAuthority } from '../../src/stage/exact-production-graph.js';
 import { HardenedControlledGraphGenesisAuthority } from '../../src/stage/graph-genesis-completion.js';
 import {
@@ -345,6 +346,29 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       expect(drained).toMatchObject({ outstandingHandlerCount: 0, openSocketCount: 0 });
       expect(drained.acceptedHandlerCount).toBeGreaterThanOrEqual(4);
     } finally { await listener.close(); }
+  });
+
+  it('drains the disarmed broker listener after denied, expired, or cancelled approval outcomes', async () => {
+    for (const expected of ['denied', 'expired', 'cancelled'] as const) {
+      const listener = new HardenedLoopbackBrokerListener({} as HardenedMetadataBrokerAuthority);
+      const approvals = new LocalApprovalService();
+      await listener.listen();
+      try {
+        const ticket = approvals.request({
+          kind: 'graph_genesis', serverId: 'synthetic', toolName: 'synthetic', arguments: {},
+          risk: { score: 1, band: 'low', signals: [] }, reasonCodes: [],
+        }, expected === 'expired' ? 15 : 1_000);
+        if (expected === 'denied') approvals.decide(ticket.request.id, 'denied');
+        if (expected === 'cancelled') ticket.cancel();
+        await expect(ticket.outcome).resolves.toBe(expected);
+        await expect(listener.closeAndDrain()).resolves.toMatchObject({
+          acceptedHandlerCount: 0, outstandingHandlerCount: 0, openSocketCount: 0,
+        });
+      } finally {
+        approvals.close();
+        await listener.close();
+      }
+    }
   });
 
   it('supervises only an authenticated capsule and records bounded terminal process evidence', async () => {

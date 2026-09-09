@@ -7,8 +7,10 @@ network-free readiness foundation is committed and pushed at `7c15130`. The appr
 owner and synthetic full-flow are committed and pushed at `592b286`: the exact CLI now hands off to one
 owner of runtime capture, containment, approval, audit, broker, process, output, cleanup and terminal
 reconciliation. The compiled production probe no longer depends on a test fixture. Default tests do not invoke
-the live owner; the full network-free regression is `290 passed, 3 skipped`. No product DB, operator output,
-public registry, npm process, installation, tarball or package code was used. See
+the live owner; the full network-free regression is `290 passed, 3 skipped`. One disposable first command
+attempt reached Dashboard approval and expired before external read, npm, candidate output or package effect;
+its lingering disarmed broker listener exposed a process-liveness defect. The local uncommitted correction
+drains that listener on deny, expiry and cancellation. See
 `docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
@@ -222,9 +224,12 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## In Progress
 
-- A pre-spawn cancellation classification correction is implemented locally and uncommitted: an approved
+- The pre-spawn cancellation classification correction is committed and pushed at `31fd835`: an approved
   action cancelled before spawn and before any external read returns `not_started`/exit 2, while quarantine,
   terminal ambiguity, spawn and external-read outcomes retain their conservative classifications.
+- A disposable first live command attempt expired before approval and produced no external read, npm,
+  candidate or package effect. The local uncommitted liveness correction drains the disarmed broker listener
+  before Dashboard teardown on denial, expiry or cancellation.
 - The public CLI is connected locally, but the production function has never been invoked. One exact live
   acceptance remains a separate approval for named paths plus a personal Dashboard `Approve once` decision.
 - The execution envelope directly binds the owner-captured comprehensive runtime-manifest digest as well as

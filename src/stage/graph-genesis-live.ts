@@ -276,6 +276,8 @@ export async function runExactProductionGraphGenesisLive(
     const authorization = await authorizationPromise;
     if (authorization.status !== 'authorized') {
       phases.fail();
+      await listener.closeAndDrain();
+      listener = undefined;
       await shutdownDashboard(approvals, dashboard, dashboardState);
       approvals = undefined; dashboard = undefined; dashboardState = undefined;
       auditSource.database.close();

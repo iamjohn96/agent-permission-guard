@@ -112,6 +112,11 @@ describe('Exact Production Graph Genesis owner boundary', () => {
     }
     expect(source).toContain('setTimeout(() => controller.abort(), 60_000)');
     expect(source).toContain("const supervisor = new GraphGenesisProcessSupervisor(plans, new NodeGraphGenesisSpawnAdapter());\n    throwIfAborted(controller.signal);\n    spawned = true;");
+    const rejectedApproval = source.indexOf("if (authorization.status !== 'authorized')");
+    const listenerDrain = source.indexOf('await listener.closeAndDrain();', rejectedApproval);
+    const dashboardShutdown = source.indexOf('await shutdownDashboard(approvals, dashboard, dashboardState);', rejectedApproval);
+    expect(listenerDrain).toBeGreaterThan(rejectedApproval);
+    expect(dashboardShutdown).toBeGreaterThan(listenerDrain);
   });
 });
 
