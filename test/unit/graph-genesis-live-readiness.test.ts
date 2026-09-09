@@ -1,4 +1,5 @@
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,8 +10,8 @@ import { AuditQueryService } from '../../src/audit/query-service.js';
 import { SqliteAuditRecorder } from '../../src/audit/recorder.js';
 import {
   graphGenesisUsage,
+  assertGraphGenesisPathInputs,
   parseGraphGenesisArguments,
-  runGraphGenesisReadiness,
 } from '../../src/cli/graph-genesis.js';
 import { startDashboard } from '../../src/dashboard/server.js';
 import { writeExclusiveDashboardStateFile } from '../../src/dashboard/state-file.js';
@@ -54,20 +55,34 @@ describe('exact production Graph Genesis live-run readiness', () => {
     }
   });
 
-  it('fails closed without opening the DB, creating output, starting listeners, or external reads', async () => {
+  it('validates local path identity without opening the DB, creating output, starting listeners, or external reads', () => {
     const parent = temporaryDirectory('apg-live-readiness-');
     const auditPath = join(parent, 'audit.sqlite');
     const outputPath = join(parent, 'candidate.json');
     writeFileSync(auditPath, 'not a sqlite database', { mode: 0o600 });
     chmodSync(auditPath, 0o600);
-    const result = await runGraphGenesisReadiness({
+    expect(() => assertGraphGenesisPathInputs({
       kind: 'run', auditDbPath: auditPath, outputPath, dashboardPort: 0,
-    });
-    expect(result).toMatchObject({
-      status: 'blocked', exitCode: 3, externalReadMayHaveOccurred: false,
-      installationOccurred: false, packageDownloadOccurred: false,
-    });
-    expect(result.bypassWarning).toContain('Direct npm/npx commands bypass APG');
+    })).not.toThrow();
+    expect(() => assertGraphGenesisPathInputs({
+      kind: 'run', auditDbPath: join(parent, 'missing.sqlite'), outputPath, dashboardPort: 0,
+    })).toThrow();
+    expect(() => readFileSync(auditPath, 'utf8')).not.toThrow();
+    expect(() => readFileSync(outputPath, 'utf8')).toThrow();
+  });
+
+  it('keeps the production owner behind one dynamic CLI boundary', () => {
+    const cli = readFileSync(join(process.cwd(), 'src/cli/graph-genesis.ts'), 'utf8');
+    const live = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live.ts'), 'utf8');
+    expect(cli).toContain("await import('../stage/graph-genesis-live.js')");
+    expect(live).toContain('export async function runExactProductionGraphGenesisLive(');
+    expect(live).toContain('new SystemRegistryAddressResolver()');
+    expect(live).toContain('new NodePinnedHttpsClient()');
+    expect(live).toContain('new NodeGraphGenesisSpawnAdapter()');
+    expect(live).not.toContain('dist/test/');
+    const main = readFileSync(join(process.cwd(), 'src/cli/main.ts'), 'utf8');
+    expect(main).toContain('runGraphGenesisReadiness(parsed, controller.signal)');
+    expect(main).toContain("process.once('SIGINT', cancel)");
   });
 
   it('keeps Graph Dashboard health-only until one action is bound and never enumerates other actions', async () => {

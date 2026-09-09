@@ -57,14 +57,14 @@ afterEach(() => {
 });
 
 describe('production Graph Genesis approval and execution composition foundation', () => {
-  it('keeps the composition foundation free of public DNS, HTTPS, and npm spawn while the CLI stays fail-closed', () => {
+  it('keeps the composition foundation free of public DNS, HTTPS, and npm spawn behind the live owner', () => {
     const source = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-composition.ts'), 'utf8');
     expect(source).not.toMatch(/node:dns|node:https|SystemRegistryAddressResolver|NodePinnedHttpsClient|NodeGraphGenesisSpawnAdapter/);
     expect(source).not.toMatch(/import\s+\{[^}]*\bspawn\b|\bexecFile\s*\(|npm-cli/);
     const cli = readFileSync(join(process.cwd(), 'src/cli/main.ts'), 'utf8');
     const readiness = readFileSync(join(process.cwd(), 'src/cli/graph-genesis.ts'), 'utf8');
     expect(cli).toContain('runGraphGenesisReadiness');
-    expect(readiness).toContain("reasonCode: 'live_execution_not_enabled'");
+    expect(readiness).toContain("await import('../stage/graph-genesis-live.js')");
     expect(readiness).not.toMatch(/node:dns|node:https|node:child_process|openAuditDatabase|startDashboard|npm-cli/);
   });
 
@@ -82,6 +82,45 @@ describe('production Graph Genesis approval and execution composition foundation
       );
       const executionAudit = sessions.createExecutionAuditGate(audit, prepared.envelope);
       expect(executionAudit.implementationKind).toBe('production');
+      expect(prepared.envelope).toMatchObject({
+        runtimeManifestDigest: '6'.repeat(64),
+        containmentEvidenceDigest: fixture.prepared.plan.containmentEvidenceDigest,
+      });
+      await expect(executionAudit.record('runtime_snapshot_complete', {
+        runtimeManifestDigest: '0'.repeat(64),
+      })).rejects.toMatchObject({ code: 'stage_audit_incomplete' });
+      await executionAudit.record('runtime_snapshot_complete', {
+        runtimeManifestDigest: prepared.envelope.runtimeManifestDigest,
+      });
+      await expect(executionAudit.record('containment_probe_complete', {
+        containmentEvidenceDigest: '0'.repeat(64),
+      })).rejects.toMatchObject({ code: 'stage_audit_incomplete' });
+      await executionAudit.record('containment_probe_complete', {
+        containmentEvidenceDigest: prepared.envelope.containmentEvidenceDigest,
+      });
+      await expect(executionAudit.record('plan_ready', {
+        executionEnvelopeHash: '0'.repeat(64),
+      })).rejects.toMatchObject({ code: 'stage_audit_incomplete' });
+      await executionAudit.record('plan_ready', {
+        executionEnvelopeHash: prepared.envelope.executionEnvelopeHash,
+      });
+      const preparationOrder = database.prepare(`
+        SELECT event_type FROM audit_events WHERE tool_call_id = ?
+          AND event_type IN (
+            'decision_recorded',
+            'graph_genesis_session_created',
+            'graph_genesis_execution_runtime_snapshot_complete',
+            'graph_genesis_execution_containment_probe_complete',
+            'graph_genesis_execution_plan_ready'
+          ) ORDER BY sequence
+      `).all(audit.actionId);
+      expect(preparationOrder).toEqual([
+        { event_type: 'decision_recorded' },
+        { event_type: 'graph_genesis_session_created' },
+        { event_type: 'graph_genesis_execution_runtime_snapshot_complete' },
+        { event_type: 'graph_genesis_execution_containment_probe_complete' },
+        { event_type: 'graph_genesis_execution_plan_ready' },
+      ]);
       expect(() => sessions.createExecutionAuditGate(audit, { ...prepared.envelope }))
         .toThrowError(expect.objectContaining({ code: 'approval_invalid' }));
       let monotonic = 1_000;
@@ -108,7 +147,9 @@ describe('production Graph Genesis approval and execution composition foundation
       expect(result.status).toBe('authorized');
       if (result.status !== 'authorized') throw new Error('expected authorization');
       expect(result.executionAudit).toBe(executionAudit);
-      expect(result.executionAudit.events).toEqual(['authorization_finalized']);
+      expect(result.executionAudit.events).toEqual([
+        'runtime_snapshot_complete', 'containment_probe_complete', 'plan_ready', 'authorization_finalized',
+      ]);
       expect(sessions.authenticatesStartLease(result.lease, fixture.prepared.plan.planHash)).toBe(true);
       expect(sessions.consumeStartLease(result.lease, 'broker_arm', 2_001)).toBe(true);
       expect(sessions.consumeStartLease(result.lease, 'broker_arm', 2_002)).toBe(false);
@@ -161,7 +202,16 @@ describe('production Graph Genesis approval and execution composition foundation
       expect(terminalEvents).toEqual([
         { event_type: 'graph_genesis_complete' }, { event_type: 'outcome_receipt_finalized' },
       ]);
-      const productionProof = new ProductionGraphGenesisTerminalProofSource(source.canonicalPath);
+      const productionProof = new ProductionGraphGenesisTerminalProofSource({
+        canonicalPath: source.canonicalPath,
+        fileIdentityDigest: source.fileIdentityDigest,
+        schemaDigest: source.schemaDigest,
+      });
+      expect(() => new ProductionGraphGenesisTerminalProofSource({
+        canonicalPath: source.canonicalPath,
+        fileIdentityDigest: '0'.repeat(64),
+        schemaDigest: source.schemaDigest,
+      })).toThrow();
       expect(productionProof.hasCompleteTerminalProof({
         actionId: audit.actionId,
         executionEnvelopeHash: prepared.envelope.executionEnvelopeHash,
@@ -169,6 +219,15 @@ describe('production Graph Genesis approval and execution composition foundation
         candidateDigest: '7'.repeat(64),
         artifactDigest: '8'.repeat(64),
       })).toBe(true);
+      chmodSync(dirname(source.canonicalPath), 0o755);
+      expect(productionProof.hasCompleteTerminalProof({
+        actionId: audit.actionId,
+        executionEnvelopeHash: prepared.envelope.executionEnvelopeHash,
+        planHash: prepared.envelope.planHash,
+        candidateDigest: '7'.repeat(64),
+        artifactDigest: '8'.repeat(64),
+      })).toBe(false);
+      chmodSync(dirname(source.canonicalPath), 0o700);
       expect(productionProof.hasCompleteTerminalProof({
         actionId: audit.actionId,
         executionEnvelopeHash: prepared.envelope.executionEnvelopeHash,
@@ -430,6 +489,8 @@ function envelopeFixture(
   return envelopes.create({
     prepared: fixture.prepared,
     dashboardInstanceId: '11111111-1111-4111-8111-111111111111',
+    dashboardPort: 47_831,
+    runtimeManifestDigest: '6'.repeat(64),
     bootSessionDigest: '1'.repeat(64),
     audit: {
       path: auditSource?.canonicalPath ?? join(fixture.parent, 'audit.sqlite'),

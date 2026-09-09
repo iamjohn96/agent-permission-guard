@@ -120,8 +120,18 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       process.stdout.write(`${graphGenesisUsage()}\n`);
       return;
     }
-    const result = await runGraphGenesisReadiness(parsed);
-    process.stderr.write('[apg] Graph Genesis live execution remains fail-closed at this readiness checkpoint.\n');
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    process.once('SIGINT', cancel);
+    process.once('SIGTERM', cancel);
+    let result;
+    try {
+      result = await runGraphGenesisReadiness(parsed, controller.signal);
+    } finally {
+      process.removeListener('SIGINT', cancel);
+      process.removeListener('SIGTERM', cancel);
+    }
+    process.stderr.write(`[apg] Graph Genesis result: ${result.status} (${result.reasonCode}).\n`);
     process.stderr.write(`[apg] protection boundary: ${result.bypassWarning}\n`);
     process.exitCode = result.exitCode;
     return;

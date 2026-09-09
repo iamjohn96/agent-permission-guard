@@ -66,11 +66,13 @@ export type GraphGenesisExecutionEnvelopeV1 = Readonly<{
   planId: string;
   planHash: string;
   safeProjectionDigest: string;
+  /** Comprehensive owner-captured runtime manifest, distinct from the plan's runtime snapshot subset. */
   runtimeManifestDigest: string;
   hostEvidenceDigest: string;
   bootSessionDigest: string;
   workspaceBinding: string;
   containmentProfileDigest: string;
+  containmentEvidenceDigest: string;
   routeTokenDigest: string;
   launchDigest: string;
   environmentDigest: string;
@@ -85,6 +87,7 @@ export type GraphGenesisExecutionEnvelopeV1 = Readonly<{
   outputParentIdentityDigest: string;
   outputRule: 'exclusive_new_private_file';
   dashboardInstanceId: string;
+  dashboardPort: number;
   requestedAt: string;
   planDeadlineMonotonicMs: number;
   approvalTtlMs: 120000;
@@ -111,6 +114,8 @@ export class GraphGenesisExecutionEnvelopeAuthority {
   create(input: Readonly<{
     prepared: PreparedHardenedGraphGenesis;
     dashboardInstanceId: string;
+    dashboardPort: number;
+    runtimeManifestDigest: string;
     bootSessionDigest: string;
     audit: Readonly<{
       path: string;
@@ -132,6 +137,8 @@ export class GraphGenesisExecutionEnvelopeAuthority {
     if (!this.planAuthority.authenticatesPair(plan, capsule)
       || projection.planHash !== plan.planHash || projection.planId !== plan.planId
       || !UUID.test(input.dashboardInstanceId)
+      || !Number.isSafeInteger(input.dashboardPort) || input.dashboardPort < 1024 || input.dashboardPort > 65_535
+      || !isDigest(input.runtimeManifestDigest)
       || !isDigest(input.bootSessionDigest) || !isDigest(input.audit.schemaDigest)
       || !isDigest(input.audit.fileIdentityDigest) || !isDigest(input.audit.initialChainTail)
       || !isDigest(input.audit.durabilityProfileDigest)
@@ -148,11 +155,12 @@ export class GraphGenesisExecutionEnvelopeAuthority {
       planId: plan.planId,
       planHash: plan.planHash,
       safeProjectionDigest: digest(projection),
-      runtimeManifestDigest: digest(plan.runtimeSnapshots),
+      runtimeManifestDigest: input.runtimeManifestDigest,
       hostEvidenceDigest: plan.hostEvidenceDigest,
       bootSessionDigest: input.bootSessionDigest,
       workspaceBinding: plan.workspaceBinding,
       containmentProfileDigest: plan.containmentProfileDigest,
+      containmentEvidenceDigest: plan.containmentEvidenceDigest,
       routeTokenDigest: plan.routeTokenDigest,
       launchDigest: plan.launchDigest,
       environmentDigest: plan.environmentDigest,
@@ -167,6 +175,7 @@ export class GraphGenesisExecutionEnvelopeAuthority {
       outputParentIdentityDigest: input.output.parentIdentityDigest,
       outputRule: 'exclusive_new_private_file' as const,
       dashboardInstanceId: input.dashboardInstanceId,
+      dashboardPort: input.dashboardPort,
       requestedAt: input.requestedAt,
       planDeadlineMonotonicMs: input.planDeadlineMonotonicMs,
       approvalTtlMs: APPROVAL_TTL_MS as 120000,
@@ -296,6 +305,10 @@ export class ProductionGraphGenesisSessionAuthority implements GraphGenesisStart
       });
     }).immediate();
     this.#auditBindings.set(audit, envelope);
+    audit.appendEvidence('graph_genesis_session_created', {
+      executionEnvelopeHash: envelope.executionEnvelopeHash,
+      planHash: envelope.planHash,
+    });
     this.#executionAudits.set(audit, new GraphGenesisAuditGate(
       envelope.planHash,
       new BoundAuditCallSink(audit, envelope),
@@ -329,10 +342,6 @@ export class ProductionGraphGenesisSessionAuthority implements GraphGenesisStart
       || requestedMonotonicMs >= input.envelope.planDeadlineMonotonicMs
       || observedWallMs < requestedWallMs || observedWallMs - requestedWallMs > 180_000) failApproval();
     this.#usedEnvelopes.add(input.envelope);
-    input.audit.appendEvidence('graph_genesis_session_created', {
-      executionEnvelopeHash: input.envelope.executionEnvelopeHash,
-      planHash: input.envelope.planHash,
-    });
     const graphGenesis = this.envelopes.approvalView(input.envelope, input.privateCapsule);
     const ticket = this.approvals.requestHidden({
       kind: 'graph_genesis',
@@ -429,6 +438,12 @@ class BoundAuditCallSink implements GraphGenesisDurableAuditSink {
 
   async append(event: Parameters<GraphGenesisDurableAuditSink['append']>[0], payload: Readonly<Record<string, string | number | boolean>>): Promise<void> {
     if (payload.planHash !== this.envelope.planHash) failApproval();
+    if (event === 'runtime_snapshot_complete'
+      && payload.runtimeManifestDigest !== this.envelope.runtimeManifestDigest) failApproval();
+    if (event === 'containment_probe_complete'
+      && payload.containmentEvidenceDigest !== this.envelope.containmentEvidenceDigest) failApproval();
+    if (event === 'plan_ready'
+      && payload.executionEnvelopeHash !== this.envelope.executionEnvelopeHash) failApproval();
     if (event === 'npm_spawn_started') this.audit.markExecutionStarted();
     this.audit.appendEvidence(`graph_genesis_execution_${event}`, {
       ...payload,

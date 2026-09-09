@@ -54,29 +54,64 @@ export interface GraphGenesisCandidateTerminalProofSource {
   hasCompleteTerminalProof(query: CandidateTerminalProofQuery): boolean | Promise<boolean>;
 }
 
+export type ProductionGraphGenesisAuditProofIdentity = Readonly<{
+  canonicalPath: string;
+  fileIdentityDigest: string;
+  schemaDigest: string;
+}>;
+
 /** Production proof source: one exact private DB path, reopened read-only for each reconciliation. */
 export class ProductionGraphGenesisTerminalProofSource implements GraphGenesisCandidateTerminalProofSource {
   readonly #canonicalAuditPath: string;
+  readonly #identity: ProductionGraphGenesisAuditProofIdentity;
 
-  constructor(auditPath: string) {
-    const canonical = realpathSync(auditPath);
+  constructor(identity: ProductionGraphGenesisAuditProofIdentity) {
+    const canonical = realpathSync(identity.canonicalPath);
     const parent = lstatSync(dirname(canonical));
     const file = lstatSync(canonical);
     const currentUser = typeof process.geteuid === 'function' ? process.geteuid() : file.uid;
-    if (canonical !== auditPath || !parent.isDirectory() || parent.isSymbolicLink()
+    if (canonical !== identity.canonicalPath || !SHA256.test(identity.fileIdentityDigest)
+      || !SHA256.test(identity.schemaDigest) || !parent.isDirectory() || parent.isSymbolicLink()
       || parent.uid !== currentUser || (parent.mode & 0o777) !== 0o700
       || !file.isFile() || file.isSymbolicLink() || file.nlink !== 1
       || file.uid !== currentUser || (file.mode & 0o777) !== 0o600) fail();
+    if (sha256(canonicalJson({
+      device: file.dev, inode: file.ino, owner: file.uid, mode: file.mode & 0o7777,
+    })) !== identity.fileIdentityDigest) fail();
     this.#canonicalAuditPath = canonical;
+    this.#identity = Object.freeze({ ...identity });
   }
 
   hasCompleteTerminalProof(query: CandidateTerminalProofQuery): boolean {
-    const database = openAuditDatabaseReadOnly(this.#canonicalAuditPath);
+    let database: ReturnType<typeof openAuditDatabaseReadOnly> | undefined;
     try {
+      const canonical = realpathSync(this.#canonicalAuditPath);
+      const parent = lstatSync(dirname(canonical));
+      const current = lstatSync(canonical);
+      const currentUser = typeof process.geteuid === 'function' ? process.geteuid() : current.uid;
+      if (canonical !== this.#canonicalAuditPath || !parent.isDirectory() || parent.isSymbolicLink()
+        || parent.uid !== currentUser || (parent.mode & 0o777) !== 0o700
+        || !current.isFile() || current.isSymbolicLink() || current.nlink !== 1
+        || current.uid !== currentUser || (current.mode & 0o777) !== 0o600
+        || sha256(canonicalJson({
+          device: current.dev, inode: current.ino, owner: current.uid, mode: current.mode & 0o7777,
+        })) !== this.#identity.fileIdentityDigest) return false;
+      database = openAuditDatabaseReadOnly(this.#canonicalAuditPath);
       const events = database.prepare(`
         SELECT event_type, event_json, previous_hash, event_hash
         FROM audit_events ORDER BY sequence
       `).all() as Array<{ event_type: string; event_json: string; previous_hash: string; event_hash: string }>;
+      const migrations = database.prepare('SELECT version FROM schema_migrations ORDER BY version')
+        .all() as Array<{ version: number }>;
+      const tables = database.prepare(`
+        SELECT name, sql FROM sqlite_schema
+        WHERE type = 'table' AND name IN ('approvals', 'audit_events', 'schema_migrations', 'tool_calls')
+        ORDER BY name
+      `).all() as Array<{ name: string; sql: string }>;
+      if (canonicalJson(migrations.map((row) => row.version)) !== '[1,2]'
+        || canonicalJson(tables.map((row) => row.name))
+          !== canonicalJson(['approvals', 'audit_events', 'schema_migrations', 'tool_calls'])
+        || sha256(canonicalJson({ migrations: [1, 2], tables })) !== this.#identity.schemaDigest) return false;
       let tail = '0'.repeat(64);
       for (const event of events) {
         if (event.previous_hash !== tail || sha256(`${event.previous_hash}\n${event.event_json}`) !== event.event_hash) return false;
@@ -123,7 +158,7 @@ export class ProductionGraphGenesisTerminalProofSource implements GraphGenesisCa
         && observed.terminalAuditStatus === 'complete';
     } catch {
       return false;
-    } finally { database.close(); }
+    } finally { database?.close(); }
   }
 }
 

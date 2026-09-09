@@ -1,6 +1,8 @@
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, normalize, resolve } from 'node:path';
 
+import type { ProductionGraphGenesisLiveResult } from '../stage/graph-genesis-live.js';
+
 const USAGE = 'Usage: apg graph genesis filesystem --audit-db <existing-private-apg-audit.sqlite> --output <absent-candidate.json> [--dashboard-port <0-or-port>] [--dashboard-state <absent-private-dashboard.json>]';
 const FORBIDDEN_ENVIRONMENT_KEYS = /^(?:NODE_OPTIONS|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|SSL_CERT_FILE|SSL_CERT_DIR|HTTPS?_PROXY|ALL_PROXY|NO_PROXY|NPM_CONFIG_.+)$/iu;
 
@@ -13,16 +15,6 @@ export type ExactGraphGenesisArguments = Readonly<{
 }>;
 
 export type GraphGenesisHelpArguments = Readonly<{ kind: 'help' }>;
-
-export type GraphGenesisReadinessResult = Readonly<{
-  status: 'blocked';
-  exitCode: 3;
-  reasonCode: 'live_execution_not_enabled' | 'local_readiness_failed';
-  externalReadMayHaveOccurred: false;
-  installationOccurred: false;
-  packageDownloadOccurred: false;
-  bypassWarning: 'Direct npm/npx commands bypass APG and receive none of this protection or evidence.';
-}>;
 
 export function parseGraphGenesisArguments(
   argv: readonly string[],
@@ -58,25 +50,27 @@ export function parseGraphGenesisArguments(
   });
 }
 
-/**
- * Production CLI gate for the network-free readiness checkpoint.
- * It deliberately exposes no collaborator injection and cannot open the DB, create files,
- * start listeners, resolve DNS, contact a registry, or spawn npm.
- */
+/** Closed CLI handoff. Dynamic loading keeps parsing and --help effect-free. */
 export async function runGraphGenesisReadiness(
   input: ExactGraphGenesisArguments,
   signal?: AbortSignal,
-): Promise<GraphGenesisReadinessResult> {
-  try {
-    if (signal?.aborted === true) throw new Error('cancelled');
-    assertNoForbiddenEnvironmentKeys();
-    assertPrivateExistingAuditFile(input.auditDbPath);
-    assertAbsentPrivateOutput(input.outputPath);
-    if (input.dashboardStatePath !== undefined) assertAbsentPrivateOutput(input.dashboardStatePath);
-    return safeResult('live_execution_not_enabled');
-  } catch {
-    return safeResult('local_readiness_failed');
-  }
+): Promise<ProductionGraphGenesisLiveResult> {
+  const { runExactProductionGraphGenesisLive } = await import('../stage/graph-genesis-live.js');
+  return runExactProductionGraphGenesisLive(input, signal);
+}
+
+/** Read-only input validation used by the sole production owner before any local effect. */
+export function assertGraphGenesisLocalInputs(input: ExactGraphGenesisArguments, signal?: AbortSignal): void {
+  if (signal?.aborted === true) throw new Error('cancelled');
+  assertNoForbiddenEnvironmentKeys();
+  assertGraphGenesisPathInputs(input);
+}
+
+/** Path-only half of local validation; exposed for network-free tests without environment-value access. */
+export function assertGraphGenesisPathInputs(input: ExactGraphGenesisArguments): void {
+  assertPrivateExistingAuditFile(input.auditDbPath);
+  assertAbsentPrivateOutput(input.outputPath);
+  if (input.dashboardStatePath !== undefined) assertAbsentPrivateOutput(input.dashboardStatePath);
 }
 
 export function graphGenesisUsage(): string { return USAGE; }
@@ -122,18 +116,6 @@ function assertAbsentPrivateOutput(path: string): void {
   const currentUser = typeof process.geteuid === 'function' ? process.geteuid() : parent.uid;
   if (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== currentUser
     || (parent.mode & 0o777) !== 0o700) throw new Error('Output parent is not private');
-}
-
-function safeResult(reasonCode: GraphGenesisReadinessResult['reasonCode']): GraphGenesisReadinessResult {
-  return Object.freeze({
-    status: 'blocked' as const,
-    exitCode: 3 as const,
-    reasonCode,
-    externalReadMayHaveOccurred: false as const,
-    installationOccurred: false as const,
-    packageDownloadOccurred: false as const,
-    bypassWarning: 'Direct npm/npx commands bypass APG and receive none of this protection or evidence.' as const,
-  });
 }
 
 class GraphGenesisUsageError extends Error {

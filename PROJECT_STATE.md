@@ -3,11 +3,12 @@
 ## Current Milestone
 
 The Exact Production Graph Genesis Live Run Readiness Architecture Check was accepted on 2026-09-09. Its first
-network-free readiness foundation is implemented locally and uncommitted: exact effect-free CLI parsing,
-fail-closed path/environment readiness, WAL/FULL/integrity/sidecar durability identity, immediate and bounded
-Graph audit records, closed detailed terminal outcomes, action/envelope-scoped Dashboard approval/audit,
-exclusive state handoff, durable candidate readback/fsync and DB-backed terminal proof. The public command
-remains deliberately disabled until the non-injectable production owner joins every phase. No real action occurred. See
+network-free readiness foundation is committed and pushed at `7c15130`. The approved non-injectable production
+owner and synthetic full-flow are implemented locally and uncommitted: the exact CLI now hands off to one
+owner of runtime capture, containment, approval, audit, broker, process, output, cleanup and terminal
+reconciliation. The compiled production probe no longer depends on a test fixture. Default tests do not invoke
+the live owner; the full network-free regression is `290 passed, 3 skipped`. No product DB, operator output,
+public registry, npm process, installation, tarball or package code was used. See
 `docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
@@ -221,25 +222,32 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## In Progress
 
-- Exact Production Graph Genesis live-run readiness architecture is accepted and its first fail-closed
-  foundation is implemented locally. It is not committed and the real action remains unavailable.
-- The existing composition foundation is committed and pushed at `6108936`; the working tree was clean at
-  the new Architecture Check baseline.
-- The execution envelope binds the exact plan/projection, Dashboard instance, runtime, policy,
+- Exact Production Graph Genesis production owner and synthetic full-flow are implemented locally from clean
+  baseline `7c15130`; commit and push require a separate approval.
+- The public CLI is connected locally, but the production function has never been invoked. One exact live
+  acceptance remains a separate approval for named paths plus a personal Dashboard `Approve once` decision.
+- The execution envelope directly binds the owner-captured comprehensive runtime-manifest digest as well as
+  the exact plan/projection, Dashboard instance, policy,
   persistent audit sink, candidate output, limits and deadlines. The closed preflight hash is never reused.
 - Broker arm and process spawn now require distinct one-time consumptions of the same authenticated start
   lease; listener close-and-drain and the synthetic single abort owner close the prior race gaps.
 - Receipt schema 1.2 and a terminal-audit-bound candidate artifact let later stages verify the
   observed graph without treating a copied/orphan file as launch or profile authority.
-- A closed rehearsal report remains evidence-only, not reusable approval or execution authority. The public
-  CLI grammar exists but returns `live_execution_not_enabled`; the non-injectable owner joining fresh capture,
-  live sink/Dashboard, real transport/process, post-state/output/cleanup and reconciliation remains the blocker.
+- A closed synthetic result remains evidence-only, not reusable approval or execution authority. The test-only
+  full-flow twin has no production resolver, HTTPS client or spawn adapter.
+- A candidate output is durable before terminal commit but is not importable without matching DB-backed
+  `graph_genesis_complete` and Outcome Receipt proof. An interrupted acknowledgement performs one read-only
+  reconciliation and never retries the action.
+- Post-spawn cleanup is permitted only from authenticated post-state. Unknown trees are retained as a bounded
+  private quarantine and represented by a digest reference instead of unsafe broad deletion or path disclosure.
 - The implemented preflight audit adapter reuses the current schema only in a new owned temporary DB, with namespaced
   preflight events, a dedicated parent row and committed/reopened chain verification; it creates no receipt
   or fictional approval and does not open the product audit database.
 
 ## Remaining
 
+- Review, commit and push the production-owner checkpoint, then separately authorize one exact production
+  Graph Genesis live acceptance using an existing private APG audit DB and absent private candidate path.
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
 - Separately approve a production graph profile, registry confirmation, target artifact download/stage
   creation, receipt 1.2, and package startup.
@@ -292,6 +300,14 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Known Issues
 
+- The production Graph Genesis owner has not yet been exercised. Its exact macOS/Node/npm/runtime-path checks
+  may fail closed during the first acceptance; there is intentionally no fallback path or version widening.
+- APG verifies the captured runtime files and containment observations, not the complete OS, kernel, dynamic
+  libraries or system trust store.
+- A post-spawn failure before authenticated post-state leaves the bounded private temporary root quarantined.
+  Automatic deletion is intentionally withheld; the audit/result carries only a reference digest.
+- A successful Graph Genesis candidate is unsigned public graph evidence, not a production profile, staged
+  package or MCP launch authority.
 - Exact identity currently covers the approved top-level package, not the complete transitive dependency graph.
 - File verification is limited to package manifests and npm lockfiles.
 - The npm runner has one successful isolated real-package acceptance; npx remains validated only with controlled test executables and has not executed downloaded package code.
@@ -349,7 +365,7 @@ stage, receipt/database change, or staged package startup has occurred in the cu
   action/envelope-scoped Dashboard approval and audit, exclusive state handoff, WAL/FULL/integrity/sidecar
   durability identity, immediate bounded Graph audit, `output_overflow` incomplete receipt evidence,
   candidate final readback/parent fsync and read-only DB-backed terminal proof.
-- Current full network-free regression: 283 passed, 3 skipped on 2026-09-09. Build, typecheck and whitespace
+- Current full network-free regression: 290 passed, 3 skipped on 2026-09-09. Build, typecheck and whitespace
   checks passed. No product DB, public DNS/registry, npm/npx, real candidate/state output, package download,
   installation, package code, dependency/migration, credential/config read, publish or push occurred.
 - Production Graph Genesis composition focused coverage: 10 tests for static no-network/no-real-spawn wiring,
@@ -436,16 +452,16 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Current Risks
 
-- There is no owned production live-run constructor yet. The public Graph Genesis route is deliberately
-  fail-closed and the low-level production adapters remain disconnected.
+- The non-injectable production owner is locally composed but has never been invoked. The first live action
+  remains separately approval-gated and must use a fresh exact plan plus a personal Dashboard decision.
 - Terminal Outcome Receipt detail, action/envelope-scoped Dashboard data, DB durability identity, final
-  candidate readback/parent fsync and read-only terminal proof are implemented, but are not yet composed by
-  one production owner or tested by a real action.
+  candidate readback/parent fsync and read-only terminal proof are composed by that owner, but have not been
+  evidenced by a real action.
 - The production-shaped listener, transport, supervisor, post-state, cleanup, and completion authorities have
-  network-free evidence but have not performed one real combined npm/registry run.
-- An existing exact private SQLite schema can now be opened without migration and bound into an execution
-  envelope, but the product DB has not been opened or used by Graph Genesis. Live sink/output identity and
-  terminal reconciliation still require a fresh exact plan.
+  network-free composition evidence but have not performed one real combined npm/registry run.
+- An existing exact private SQLite schema can be opened without migration and bound into an execution
+  envelope, but the product DB has not been opened or used by Graph Genesis. Every live sink/output identity
+  and terminal reconciliation remains tied to one fresh exact plan.
 - Seatbelt remains a deprecated/private, exact-host development mechanism. It must pass a fresh complete
   local-only probe for each plan; there is no fallback, cross-platform claim, or hostile same-user defense.
 - DNS classification and npm-hostname TLS reduce destination substitution but do not prove registry honesty,

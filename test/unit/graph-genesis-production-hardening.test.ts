@@ -396,6 +396,56 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     expect(failures).toBe(1);
   });
 
+  it('prepares one atomic product terminal only after durable candidate output and cleanup evidence', async () => {
+    const fixture = await planFixture();
+    const audit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, new MemoryAuditSink());
+    await audit.record('runtime_snapshot_complete', { runtimeManifestDigest: '1'.repeat(64) });
+    await audit.record('containment_probe_complete', { containmentEvidenceDigest: '2'.repeat(64) });
+    await audit.record('plan_ready', { executionEnvelopeHash: '3'.repeat(64) });
+    await audit.record('authorization_finalized');
+    await audit.record('broker_armed');
+    await audit.record('npm_spawn_intent_recorded');
+    await audit.record('npm_spawn_started');
+    await audit.record('metadata_request_started', { sequence: 1, packageName: 'fixture' });
+    await audit.record('metadata_response_validated', { sequence: 1, packageName: 'fixture', responseBytes: 32 });
+    await audit.record('npm_terminal_observed', { status: 'completed', exitCode: 0, stdoutBytes: 0, stderrBytes: 0 });
+    await audit.record('lock_validation_started');
+    await audit.record('candidate_compiled');
+    expect(() => audit.prepareAtomicTerminalSuccess()).toThrow(/stage_audit_incomplete/);
+
+    const successEvents = [
+      ['runtime_snapshot_complete', { runtimeManifestDigest: '1'.repeat(64) }],
+      ['containment_probe_complete', { containmentEvidenceDigest: '2'.repeat(64) }],
+      ['plan_ready', { executionEnvelopeHash: '3'.repeat(64) }],
+      ['authorization_finalized', {}],
+      ['broker_armed', {}],
+      ['npm_spawn_intent_recorded', {}],
+      ['npm_spawn_started', {}],
+      ['metadata_request_started', { sequence: 1, packageName: 'fixture' }],
+      ['metadata_response_validated', { sequence: 1, packageName: 'fixture', responseBytes: 32 }],
+      ['npm_terminal_observed', { status: 'completed', exitCode: 0, stdoutBytes: 0, stderrBytes: 0 }],
+      ['listener_drained', { acceptedHandlerCount: 1 }],
+      ['lock_validation_started', {}],
+      ['post_state_validated', { postStateDigest: '4'.repeat(64) }],
+      ['candidate_compiled', {}],
+      ['candidate_output_intent', { artifactDigest: 'a'.repeat(64), candidateDigest: 'b'.repeat(64) }],
+      ['candidate_output_written', { artifactDigest: 'a'.repeat(64), candidateDigest: 'b'.repeat(64), bytes: 128 }],
+      ['cleanup_complete', {}],
+    ] as const;
+    const completeAudit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, new MemoryAuditSink());
+    for (const [event, payload] of successEvents) await completeAudit.record(event, payload);
+    const preparation = completeAudit.prepareAtomicTerminalSuccess();
+    expect(completeAudit.authenticatesTerminalPreparation(preparation)).toBe(true);
+    expect(preparation).toMatchObject({ terminalState: 'ready_for_atomic_product_commit' });
+    await expect(completeAudit.record('cleanup_complete')).rejects.toMatchObject({ code: 'stage_audit_incomplete' });
+    const mismatchedOutputAudit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, new MemoryAuditSink());
+    for (const [event, payload] of successEvents) {
+      await mismatchedOutputAudit.record(event, event === 'candidate_output_written'
+        ? { ...payload, candidateDigest: 'c'.repeat(64) } : payload);
+    }
+    expect(() => mismatchedOutputAudit.prepareAtomicTerminalSuccess()).toThrow(/stage_audit_incomplete/);
+  });
+
   it('rejects archive residue before post-state evidence or candidate compilation', async () => {
     const fixture = await planFixture();
     const lock = exactTargetLock();
@@ -419,6 +469,9 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     const startLease = leaseAuthority.createForTest(fixture.prepared.plan, 10_000);
     const sink = new MemoryAuditSink();
     const audit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, sink);
+    await audit.record('runtime_snapshot_complete', { runtimeManifestDigest: '1'.repeat(64) });
+    await audit.record('containment_probe_complete', { containmentEvidenceDigest: '2'.repeat(64) });
+    await audit.record('plan_ready', { executionEnvelopeHash: '3'.repeat(64) });
     await audit.record('authorization_finalized');
     const broker = new HardenedMetadataBrokerAuthority(fixture.planAuthority);
     const session = broker.prepareSession({
@@ -440,6 +493,7 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     const ledger = await broker.complete(session);
     child.close(0, null);
     const processResult = await processPromise;
+    await audit.record('listener_drained', { acceptedHandlerCount: 1 });
     const lock = exactTargetLock();
     writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), JSON.stringify({
       name: 'apg-graph-genesis', version: '0.0.0', private: true,
@@ -454,6 +508,7 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       executionCapsule: fixture.prepared.capsule,
       workspace: fixture.workspace,
     });
+    await audit.record('post_state_validated', { postStateDigest: inspected.evidence.evidenceDigest });
     const candidateCompiler = new HardenedGraphGenesisCandidateCompiler(postStates, candidates);
     const candidate = candidateCompiler.compile({
       plan: fixture.prepared.plan,

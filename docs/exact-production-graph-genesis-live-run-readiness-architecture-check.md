@@ -1,7 +1,9 @@
 # Exact Production Graph Genesis Live Run Readiness Architecture Check
 
-Status: accepted on 2026-09-09; first network-free fail-closed readiness foundation implemented locally and uncommitted.
-Baseline: `6108936` (`feat: add production graph genesis composition`), clean `main` at review start.
+Status: accepted on 2026-09-09; initial readiness foundation committed at `7c15130`; production owner and
+synthetic full-flow implementation complete locally and uncommitted. No production live run has occurred.
+Architecture-check baseline: `6108936` (`feat: add production graph genesis composition`).
+Production-owner implementation baseline: `7c15130` (`feat: add fail-closed graph genesis readiness`).
 
 ## Decision summary
 
@@ -45,6 +47,35 @@ Before acceptance, this document and its repository-state references were the on
 accepted implementation checkpoint authorizes source/tests/docs but no real execution. It does not authorize opening the
 product audit DB, creating the operator output/state file, starting the Dashboard, executing the containment
 probe, resolving DNS, contacting npm, spawning npm/npx, or writing a real candidate.
+
+## Production-owner implementation checkpoint
+
+The approved network-free checkpoint now connects the exact CLI grammar to one non-injectable production
+owner. The owner internally constructs the runtime/host snapshot authorities, local containment listener and
+probe, plan and execution envelope, existing-DB audit session, action-scoped Dashboard and one-time approval,
+pinned public-metadata transport, lock-only npm supervisor, post-state/candidate/output authorities,
+post-state-bound cleanup, atomic terminal commit and read-only terminal-proof reconciliation.
+
+The phase machine is a closed, one-way sequence. Candidate output must be exclusively created, read back,
+synced and durably audited before cleanup; cleanup must authenticate before the product terminal transaction.
+If acknowledgement of that transaction is interrupted, the owner performs at most one read-only proof check
+and never reruns npm or public transport. A post-spawn tree without authenticated post-state is quarantined;
+the receipt and safe result expose only a digest reference, never the temporary path.
+
+The owner-computed comprehensive runtime-manifest digest is a direct execution-envelope field and therefore
+part of the Dashboard-visible execution-envelope hash; it is not replaced by the narrower plan runtime
+snapshot subset. The production audit sink accepts preparation evidence only when the runtime, containment
+and plan-ready digests exactly match that envelope. These records remain bounded digest-only projections.
+
+The containment probe is now a compiled production-owned runtime asset under `dist/src/`, rather than a test
+fixture. Default tests do not import or invoke the production owner. A separate synthetic twin exercises the
+same exact phase order using fake in-memory metadata, one inert child marker, disposable private SQLite and a
+temporary exclusive output. The complete network-free regression result is `290 passed, 3 skipped`.
+
+The implementation does not itself authorize or perform the first live action. That acceptance still needs a
+separate exact command/path approval and a personal Dashboard `Approve once` decision. No registry request,
+npm process, product audit write, candidate output, installation, tarball, package body or package code was
+used during this checkpoint.
 
 ## Current readiness gaps
 
@@ -658,9 +689,11 @@ durability/evidence primitives needed by the later owner:
 
 - the exact `apg graph genesis filesystem` grammar rejects duplicate, unknown, relative, non-normalized,
   colliding and invalid-port inputs before effects;
-- the public route currently performs private-path and environment-key readiness checks and then returns a
-  stable nonzero `live_execution_not_enabled` result, with zero DB open, file creation, listener, DNS,
-  registry or process capability;
+- at the `7c15130` readiness-foundation checkpoint, the public route performed private-path and
+  environment-key readiness checks and then returned a stable nonzero `live_execution_not_enabled` result,
+  with zero DB open, file creation, listener, DNS, registry or process capability; the later local owner
+  connection described above supersedes that temporary route while remaining uninvoked and separately
+  approval-gated for any live action;
 - the existing audit DB profile now requires WAL, connection-local FULL synchronous mode, a bounded busy
   timeout, integrity success and private sidecars, and binds a durability digest into the envelope;
 - Graph writes use immediate transactions; the typed Graph audit gate enforces the exact event schema plus
@@ -679,10 +712,11 @@ durability/evidence primitives needed by the later owner:
   chain, action/envelope binding, unique ordered terminal events, Outcome Receipt digest and candidate/artifact
   digests before accepting a candidate.
 
-The production owner itself remains deliberately disabled. Runtime/host/workspace capture, Dashboard/audit
-session creation, approval, concrete broker/transport/supervisor, post-state/compiler/output/cleanup, terminal
-commit and acknowledgement reconciliation have not yet been joined behind the public route. Therefore this
-tranche is not live-run acceptance readiness and the command cannot perform the real action.
+This foundation was committed at `7c15130`; the subsequent approved local checkpoint joins its runtime/host/
+workspace capture, Dashboard/audit session, approval, concrete broker/transport/supervisor,
+post-state/compiler/output/cleanup, terminal commit and acknowledgement reconciliation behind one
+non-injectable public route. The owner has not been invoked, so this is still not a live acceptance and does
+not authorize the real action.
 
 Suggested acceptance:
 
@@ -698,6 +732,6 @@ external service, commit, or remote state changed in this Architecture Check.
 
 ## Next
 
-After implementation acceptance, build and verify the network-free readiness layer, present its exact diff,
-tests and residual risks, and request separate commit/push approval. Only after a clean pushed checkpoint may
-an exact one-time live acceptance command and Dashboard decision be proposed.
+Review the exact local production-owner diff, tests and residual risks, then request separate commit/push
+approval. Only after a clean pushed checkpoint may an exact one-time live acceptance command and Dashboard
+decision be proposed.

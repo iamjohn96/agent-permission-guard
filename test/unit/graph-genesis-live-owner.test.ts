@@ -1,0 +1,133 @@
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { openAuditDatabase, type AuditDatabase } from '../../src/db/database.js';
+import {
+  GRAPH_GENESIS_LIVE_PHASES,
+  GraphGenesisLivePhaseAuthority,
+  SyntheticGraphGenesisFullFlowTwin,
+  type GraphGenesisLivePhase,
+  type SyntheticGraphGenesisFullFlowAdapter,
+} from '../../src/stage/graph-genesis-live-state.js';
+
+const temporaryPaths: string[] = [];
+
+afterEach(() => {
+  for (const path of temporaryPaths.splice(0)) rmSync(path, { recursive: true, force: true });
+});
+
+describe('Exact Production Graph Genesis owner boundary', () => {
+  it('runs the exact full phase order with disposable SQLite, fake metadata, inert child and temporary output', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'apg-synthetic-live-'));
+    temporaryPaths.push(root);
+    chmodSync(root, 0o700);
+    const adapter = new SyntheticFullFlowFixture(root);
+    try {
+      const result = await new SyntheticGraphGenesisFullFlowTwin(adapter).run();
+      expect(result).toEqual({ status: 'synthetic_complete', phases: GRAPH_GENESIS_LIVE_PHASES });
+      expect(adapter.childRuns).toBe(1);
+      expect(adapter.metadataRequests).toEqual(['@modelcontextprotocol/server-filesystem']);
+      expect(readFileSync(adapter.outputPath, 'utf8')).toContain('synthetic-candidate-digest');
+      expect(adapter.persistedPhases()).toEqual(GRAPH_GENESIS_LIVE_PHASES);
+      expect(existsSync(adapter.workspacePath)).toBe(false);
+    } finally { adapter.close(); }
+  });
+
+  it('rejects out-of-order transitions and replay', async () => {
+    const authority = new GraphGenesisLivePhaseAuthority();
+    expect(() => authority.advance('PLAN_READY')).toThrow(/acceptance_incomplete/);
+    const adapter: SyntheticGraphGenesisFullFlowAdapter = {
+      implementationKind: 'synthetic', perform() {},
+    };
+    const twin = new SyntheticGraphGenesisFullFlowTwin(adapter);
+    await expect(twin.run()).resolves.toMatchObject({ status: 'synthetic_complete' });
+    await expect(twin.run()).rejects.toThrow(/acceptance_incomplete/);
+  });
+
+  it('stops at cancellation without running later phases', async () => {
+    const controller = new AbortController();
+    const observed: GraphGenesisLivePhase[] = [];
+    const adapter: SyntheticGraphGenesisFullFlowAdapter = {
+      implementationKind: 'synthetic',
+      perform(phase) {
+        observed.push(phase);
+        if (phase === 'BROKER_ARMED') controller.abort();
+      },
+    };
+    await expect(new SyntheticGraphGenesisFullFlowTwin(adapter).run(controller.signal))
+      .rejects.toThrow(/acceptance_incomplete/);
+    expect(observed.at(-1)).toBe('BROKER_ARMED');
+    expect(observed).not.toContain('NPM_RUNNING');
+  });
+
+  it('keeps the synthetic twin free of production network and spawn capabilities', () => {
+    const source = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live-state.ts'), 'utf8');
+    expect(source).not.toMatch(/node:dns|node:https|node:child_process|SystemRegistryAddressResolver|NodePinnedHttpsClient|NodeGraphGenesisSpawnAdapter/);
+    const tests = readFileSync(join(process.cwd(), 'test/unit/graph-genesis-live-owner.test.ts'), 'utf8');
+    expect(tests).not.toMatch(/from\s+['"][^'"]*graph-genesis-live\.js['"]/u);
+  });
+
+  it('keeps production evidence and cancellation gates in durable effect order without invoking the owner', () => {
+    const source = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live.ts'), 'utf8');
+    const ordered = [
+      "record('runtime_snapshot_complete'", "record('containment_probe_complete'", "record('plan_ready'",
+      "record('listener_drained'", "record('post_state_validated'", "record('candidate_output_intent'",
+      'artifacts.writeExclusive', "record('candidate_output_written'", "record('cleanup_complete'",
+      'await root.cleanup()', 'prepareAtomicTerminalSuccess()',
+    ];
+    let previous = -1;
+    for (const marker of ordered) {
+      const index = source.indexOf(marker, previous + 1);
+      expect(index).toBeGreaterThan(previous);
+      previous = index;
+    }
+    expect(source).toContain('setTimeout(() => controller.abort(), 60_000)');
+    expect(source).toContain("const supervisor = new GraphGenesisProcessSupervisor(plans, new NodeGraphGenesisSpawnAdapter());\n    throwIfAborted(controller.signal);\n    spawned = true;");
+  });
+});
+
+class SyntheticFullFlowFixture implements SyntheticGraphGenesisFullFlowAdapter {
+  readonly implementationKind = 'synthetic' as const;
+  readonly outputPath: string;
+  readonly workspacePath: string;
+  readonly metadataRequests: string[] = [];
+  childRuns = 0;
+  readonly #database: AuditDatabase;
+  readonly #fakeMetadata = Object.freeze({
+    name: '@modelcontextprotocol/server-filesystem',
+    version: '2026.7.10',
+    dist: { integrity: `sha512-${'a'.repeat(86)}==` },
+  });
+
+  constructor(root: string) {
+    this.outputPath = join(root, 'candidate.json');
+    this.workspacePath = join(root, 'workspace');
+    this.#database = openAuditDatabase(join(root, 'synthetic.sqlite'));
+    this.#database.exec('CREATE TABLE synthetic_graph_flow (sequence INTEGER PRIMARY KEY, phase TEXT NOT NULL)');
+  }
+
+  perform(phase: GraphGenesisLivePhase): void {
+    const sequence = GRAPH_GENESIS_LIVE_PHASES.indexOf(phase) + 1;
+    this.#database.prepare('INSERT INTO synthetic_graph_flow (sequence, phase) VALUES (?, ?)').run(sequence, phase);
+    if (phase === 'LOCAL_RESOURCES_CREATED') mkdirSync(this.workspacePath, { mode: 0o700 });
+    if (phase === 'BROKER_ARMED') {
+      expect(this.#fakeMetadata.version).toBe('2026.7.10');
+      this.metadataRequests.push(this.#fakeMetadata.name);
+    }
+    if (phase === 'NPM_RUNNING') this.childRuns += 1;
+    if (phase === 'OUTPUT_DURABLE') {
+      writeFileSync(this.outputPath, '{"candidateDigest":"synthetic-candidate-digest"}\n', { flag: 'wx', mode: 0o600 });
+    }
+    if (phase === 'WORKSPACE_CLEANED') rmSync(this.workspacePath, { recursive: true, force: false });
+  }
+
+  persistedPhases(): readonly string[] {
+    return (this.#database.prepare('SELECT phase FROM synthetic_graph_flow ORDER BY sequence').all() as Array<{ phase: string }>)
+      .map((row) => row.phase);
+  }
+
+  close(): void { this.#database.close(); }
+}

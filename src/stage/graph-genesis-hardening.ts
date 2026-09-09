@@ -716,6 +716,9 @@ export class SyntheticHardenedGraphGenesisApprovalAuthority implements HardenedG
 }
 
 export type GraphGenesisAuditEventName =
+  | 'runtime_snapshot_complete'
+  | 'containment_probe_complete'
+  | 'plan_ready'
   | 'authorization_finalized'
   | 'broker_armed'
   | 'npm_spawn_intent_recorded'
@@ -723,8 +726,12 @@ export type GraphGenesisAuditEventName =
   | 'metadata_request_started'
   | 'metadata_response_validated'
   | 'npm_terminal_observed'
+  | 'listener_drained'
   | 'lock_validation_started'
+  | 'post_state_validated'
   | 'candidate_compiled'
+  | 'candidate_output_intent'
+  | 'candidate_output_written'
   | 'cleanup_complete'
   | 'cleanup_incomplete'
   | 'genesis_complete'
@@ -739,6 +746,7 @@ export class GraphGenesisAuditGate {
   readonly #events: GraphGenesisAuditEventName[] = [];
   readonly #records: Array<Readonly<{ event: GraphGenesisAuditEventName; payload: Readonly<Record<string, string | number | boolean>> }>> = [];
   readonly #completions = new WeakSet<object>();
+  readonly #terminalPreparations = new WeakSet<object>();
   #payloadBytes = 0;
   #terminal = false;
 
@@ -766,7 +774,7 @@ export class GraphGenesisAuditGate {
   }
 
   async finalizeSuccess(): Promise<AuthenticatedHardenedGraphGenesisTerminalAudit> {
-    assertCompleteAudit(this.#records);
+    assertCompleteAudit(this.#records, false);
     await this.record('genesis_complete');
     const unsigned = Object.freeze({
       auditVersion: 2 as const,
@@ -780,12 +788,50 @@ export class GraphGenesisAuditGate {
     return completion;
   }
 
+  prepareAtomicTerminalSuccess(): AuthenticatedGraphGenesisTerminalPreparation {
+    if (this.#terminal) failAudit();
+    assertCompleteAudit(this.#records, true);
+    this.#terminal = true;
+    const unsigned = Object.freeze({
+      auditVersion: 3 as const,
+      planHash: this.planHash,
+      eventCount: this.#records.length,
+      eventsDigest: sha256(canonicalJson(this.#records)),
+      terminalState: 'ready_for_atomic_product_commit' as const,
+    });
+    const preparation = Object.freeze({ ...unsigned, auditDigest: sha256(canonicalJson(unsigned)) });
+    this.#terminalPreparations.add(preparation);
+    return preparation;
+  }
+
+  authenticatesTerminalPreparation(value: unknown): value is AuthenticatedGraphGenesisTerminalPreparation {
+    return typeof value === 'object' && value !== null && this.#terminalPreparations.has(value);
+  }
+
   authenticatesCompletion(value: unknown): value is AuthenticatedHardenedGraphGenesisTerminalAudit {
     return typeof value === 'object' && value !== null && this.#completions.has(value);
   }
 
   get events(): readonly GraphGenesisAuditEventName[] { return Object.freeze([...this.#events]); }
   get implementationKind(): GraphGenesisDurableAuditSink['implementationKind'] { return this.sink.implementationKind; }
+
+  metadataSummary(): Readonly<{
+    externalReadStatus: 'not_started' | 'incomplete' | 'validated';
+    requestCount: number;
+    uniquePackageCount: number;
+    responseBytes: number;
+  }> {
+    const started = this.#records.filter((record) => record.event === 'metadata_request_started');
+    const validated = this.#records.filter((record) => record.event === 'metadata_response_validated');
+    const names = new Set(started.map((record) => String(record.payload.packageName)));
+    const responseBytes = validated.reduce((sum, record) => sum + Number(record.payload.responseBytes), 0);
+    return Object.freeze({
+      externalReadStatus: started.length === 0 ? 'not_started' : started.length === validated.length ? 'validated' : 'incomplete',
+      requestCount: started.length,
+      uniquePackageCount: names.size,
+      responseBytes,
+    });
+  }
 }
 
 export type AuthenticatedHardenedGraphGenesisTerminalAudit = Readonly<{
@@ -794,6 +840,15 @@ export type AuthenticatedHardenedGraphGenesisTerminalAudit = Readonly<{
   eventCount: number;
   eventsDigest: string;
   terminalState: 'genesis_complete';
+  auditDigest: string;
+}>;
+
+export type AuthenticatedGraphGenesisTerminalPreparation = Readonly<{
+  auditVersion: 3;
+  planHash: string;
+  eventCount: number;
+  eventsDigest: string;
+  terminalState: 'ready_for_atomic_product_commit';
   auditDigest: string;
 }>;
 
@@ -908,16 +963,24 @@ function assertGraphGenesisLimits(limits: GraphGenesisLimits): void {
 function assertCompleteAudit(records: readonly Readonly<{
   event: GraphGenesisAuditEventName;
   payload: Readonly<Record<string, string | number | boolean>>;
-}>[]): void {
+}>[], requireOutput: boolean): void {
   const required = [
-    'authorization_finalized', 'broker_armed', 'npm_spawn_intent_recorded', 'npm_spawn_started',
-    'npm_terminal_observed', 'lock_validation_started', 'candidate_compiled', 'cleanup_complete',
+    'runtime_snapshot_complete', 'containment_probe_complete', 'plan_ready', 'authorization_finalized',
+    'broker_armed', 'npm_spawn_intent_recorded', 'npm_spawn_started', 'npm_terminal_observed',
+    'listener_drained', 'lock_validation_started', 'post_state_validated', 'candidate_compiled',
+    ...(requireOutput ? ['candidate_output_intent' as const, 'candidate_output_written' as const] : []),
+    'cleanup_complete',
   ] as const;
   let previous = -1;
   for (const event of required) {
     const index = records.findIndex((record) => record.event === event);
     if (index <= previous || records.filter((record) => record.event === event).length !== 1) failAudit();
     previous = index;
+  }
+  if (requireOutput) {
+    const intent = records.find((record) => record.event === 'candidate_output_intent')?.payload;
+    const written = records.find((record) => record.event === 'candidate_output_written')?.payload;
+    if (intent?.artifactDigest !== written?.artifactDigest || intent?.candidateDigest !== written?.candidateDigest) failAudit();
   }
   if (records.some((record) => record.event === 'genesis_incomplete' || record.event === 'cleanup_incomplete'
     || record.event === 'genesis_complete')) failAudit();
@@ -953,9 +1016,16 @@ function assertAuditPayload(
 ): void {
   const keys = Object.keys(payload).sort();
   const exactKeys: Partial<Record<GraphGenesisAuditEventName, readonly string[]>> = {
+    runtime_snapshot_complete: ['runtimeManifestDigest'],
+    containment_probe_complete: ['containmentEvidenceDigest'],
+    plan_ready: ['executionEnvelopeHash'],
     metadata_request_started: ['packageName', 'sequence'],
     metadata_response_validated: ['packageName', 'responseBytes', 'sequence'],
     npm_terminal_observed: ['exitCode', 'status', 'stderrBytes', 'stdoutBytes'],
+    listener_drained: ['acceptedHandlerCount'],
+    post_state_validated: ['postStateDigest'],
+    candidate_output_intent: ['artifactDigest', 'candidateDigest'],
+    candidate_output_written: ['artifactDigest', 'bytes', 'candidateDigest'],
     genesis_incomplete: ['externalReadMayHaveOccurred'],
   };
   const expected = [...(exactKeys[event] ?? [])].sort();
@@ -974,6 +1044,19 @@ function assertAuditPayload(
       || !Number.isSafeInteger(payload.stdoutBytes) || (payload.stdoutBytes as number) < 0 || (payload.stdoutBytes as number) > 256 * 1024
       || !Number.isSafeInteger(payload.stderrBytes) || (payload.stderrBytes as number) < 0 || (payload.stderrBytes as number) > 256 * 1024) failAudit();
   }
+  if (event === 'candidate_output_written' && (
+    typeof payload.artifactDigest !== 'string' || !SHA256.test(payload.artifactDigest)
+    || typeof payload.candidateDigest !== 'string' || !SHA256.test(payload.candidateDigest)
+    || !Number.isSafeInteger(payload.bytes) || (payload.bytes as number) < 1 || (payload.bytes as number) > 4 * 1024 * 1024
+  )) failAudit();
+  if (['runtime_snapshot_complete', 'containment_probe_complete', 'plan_ready', 'post_state_validated'].includes(event)
+    && !Object.values(payload).every((value) => typeof value === 'string' && SHA256.test(value))) failAudit();
+  if (event === 'candidate_output_intent' && (
+    typeof payload.artifactDigest !== 'string' || !SHA256.test(payload.artifactDigest)
+    || typeof payload.candidateDigest !== 'string' || !SHA256.test(payload.candidateDigest)
+  )) failAudit();
+  if (event === 'listener_drained' && (!Number.isSafeInteger(payload.acceptedHandlerCount)
+    || (payload.acceptedHandlerCount as number) < 0 || (payload.acceptedHandlerCount as number) > 1_024)) failAudit();
   if (event === 'genesis_incomplete' && typeof payload.externalReadMayHaveOccurred !== 'boolean') failAudit();
 }
 
