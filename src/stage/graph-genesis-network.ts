@@ -20,6 +20,33 @@ const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a
 const SYSTEM_RESOLVERS = new WeakSet<object>();
 const NODE_PINNED_CLIENTS = new WeakSet<object>();
 
+export type HardenedBrokerFailurePredicate =
+  | 'listener_request_rejected'
+  | 'request_route_rejected'
+  | 'session_not_armed'
+  | 'total_request_limit'
+  | 'concurrent_request_limit'
+  | 'unique_name_limit'
+  | 'aggregate_reservation_limit'
+  | 'request_intent_not_durable'
+  | 'response_validation_not_durable'
+  | 'dns_result_rejected'
+  | 'dns_incomplete'
+  | 'https_incomplete'
+  | 'wire_size_rejected'
+  | 'http_status_rejected'
+  | 'redirect_or_url_rejected'
+  | 'content_type_rejected'
+  | 'content_encoding_rejected'
+  | 'response_size_rejected'
+  | 'utf8_rejected'
+  | 'json_rejected'
+  | 'identity_rejected'
+  | 'broker_incomplete'
+  | 'unclassified';
+
+const FAILURE_TAGS = new WeakMap<object, HardenedBrokerFailurePredicate>();
+
 export type ResolvedAddress = Readonly<{ address: string; family: 4 | 6 }>;
 
 export interface RegistryAddressResolver {
@@ -30,11 +57,11 @@ export class SystemRegistryAddressResolver implements RegistryAddressResolver {
   constructor() { SYSTEM_RESOLVERS.add(this); }
 
   async resolve(hostname: 'registry.npmjs.org', signal: AbortSignal): Promise<readonly ResolvedAddress[]> {
-    if (signal.aborted) failMetadataIncomplete();
+    if (signal.aborted) failDiagnostic('dns_incomplete', 'graph_metadata_incomplete');
     const addresses = await lookup(hostname, { all: true, verbatim: true });
-    if (signal.aborted) failMetadataIncomplete();
+    if (signal.aborted) failDiagnostic('dns_incomplete', 'graph_metadata_incomplete');
     return Object.freeze(addresses.map((item) => {
-      if (item.family !== 4 && item.family !== 6) failMetadata();
+      if (item.family !== 4 && item.family !== 6) failDiagnostic('dns_result_rejected');
       return Object.freeze({ address: item.address, family: item.family });
     }));
   }
@@ -77,12 +104,14 @@ export class NodePinnedHttpsClient implements PinnedHttpsClient {
   }
 }
 
-/** Uses the identical streaming/TLS core with an in-memory test CA and local high port. */
+/** Uses the identical streaming/TLS core with an in-memory test CA and loopback-only high port. */
 export function createLocalTlsPinnedHttpsClientForTest(port: number, ca: string): PinnedHttpsClient {
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535 || ca.length === 0 || ca.length > 64 * 1024) failMetadata();
   return Object.freeze({
     implementationKind: 'synthetic' as const,
-    request: async (input: PinnedHttpsRequest, signal: AbortSignal) => requestPinnedHttps(input, signal, { port, ca }),
+    request: async (input: PinnedHttpsRequest, signal: AbortSignal) => requestPinnedHttps(
+      { ...input, address: '127.0.0.1', family: 4 }, signal, { port, ca },
+    ),
   });
 }
 
@@ -91,14 +120,14 @@ async function requestPinnedHttps(
   signal: AbortSignal,
   connection: Readonly<{ port: number; ca?: string }>,
 ): Promise<PinnedHttpsResponse> {
-    if (signal.aborted) throw new PackageStageError('graph_metadata_incomplete');
+    if (signal.aborted) failDiagnostic('https_incomplete', 'graph_metadata_incomplete');
     return await new Promise((resolvePromise, reject) => {
       let settled = false;
       const url = new URL(input.url);
-      const fail = () => {
+      const fail = (predicate: HardenedBrokerFailurePredicate) => {
         if (settled) return;
         settled = true;
-        reject(new PackageStageError('graph_metadata_incomplete'));
+        reject(diagnosticError(predicate, 'graph_metadata_incomplete'));
       };
       const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
         if (options.all === true) callback(null, [{ address: input.address, family: input.family }]);
@@ -129,18 +158,18 @@ async function requestPinnedHttps(
         if (contentLength !== undefined && (!Number.isSafeInteger(contentLength) || contentLength < 0
           || contentLength > input.maximumBytes)) {
           response.destroy();
-          fail();
+          fail('wire_size_rejected');
           return;
         }
         const chunks: Buffer[] = [];
         let bytes = 0;
         response.on('data', (chunk: Buffer) => {
           bytes += chunk.byteLength;
-          if (bytes > input.maximumBytes) { response.destroy(); fail(); return; }
+          if (bytes > input.maximumBytes) { response.destroy(); fail('wire_size_rejected'); return; }
           chunks.push(Buffer.from(chunk));
         });
-        response.once('error', fail);
-        response.once('aborted', fail);
+        response.once('error', () => fail('https_incomplete'));
+        response.once('aborted', () => fail('https_incomplete'));
         response.once('end', () => {
           if (settled) return;
           settled = true;
@@ -154,12 +183,12 @@ async function requestPinnedHttps(
           }));
         });
       });
-      const abort = () => { request.destroy(); fail(); };
+      const abort = () => { request.destroy(); fail('https_incomplete'); };
       const totalTimeout = setTimeout(abort, input.timeoutMs);
       totalTimeout.unref();
       signal.addEventListener('abort', abort, { once: true });
       request.setTimeout(input.timeoutMs, abort);
-      request.once('error', fail);
+      request.once('error', () => fail('https_incomplete'));
       request.once('close', () => {
         clearTimeout(totalTimeout);
         signal.removeEventListener('abort', abort);
@@ -190,15 +219,17 @@ export class BoundedNpmPublicMetadataTransport implements HardenedPublicMetadata
   ): Promise<PinnedHttpsResponse> {
     if (!PACKAGE_NAME.test(packageName) || !Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs < 1
       || limits.timeoutMs > 15_000 || !Number.isSafeInteger(limits.maximumBytes)
-      || limits.maximumBytes < 1 || limits.maximumBytes > 8 * 1024 * 1024) failMetadata();
+      || limits.maximumBytes < 1 || limits.maximumBytes > 8 * 1024 * 1024) failDiagnostic('unclassified');
     const startedAt = Date.now();
     const addresses = await resolveWithDeadline(this.resolver, signal, limits.timeoutMs);
-    if (addresses.length === 0 || addresses.length > 32 || addresses.some((item) => !isPublicAddress(item))) failMetadata();
+    if (addresses.length === 0 || addresses.length > 32 || addresses.some((item) => !isPublicAddress(item))) {
+      failDiagnostic('dns_result_rejected');
+    }
     const selected = [...addresses].sort((left, right) => Buffer.from(`${left.family}:${left.address}`).compare(Buffer.from(`${right.family}:${right.address}`)))[0]!;
     const encoded = packageName.startsWith('@') ? packageName.replace('/', '%2f') : packageName;
     const url = `https://registry.npmjs.org/${encoded}`;
     const remainingMs = limits.timeoutMs - (Date.now() - startedAt);
-    if (remainingMs < 1 || signal.aborted) failMetadataIncomplete();
+    if (remainingMs < 1 || signal.aborted) failDiagnostic('dns_incomplete', 'graph_metadata_incomplete');
     const response = await this.client.request(Object.freeze({
       url,
       hostname: 'registry.npmjs.org' as const,
@@ -211,15 +242,17 @@ export class BoundedNpmPublicMetadataTransport implements HardenedPublicMetadata
       timeoutMs: remainingMs,
       maximumBytes: limits.maximumBytes,
     }), signal);
-    if (response.status !== 200 || response.redirected || response.finalUrl !== url
-      || !['application/json', 'application/vnd.npm.install-v1+json']
-        .includes(response.contentType.toLowerCase().split(';', 1)[0] ?? '')
-      || !['', 'identity'].includes(response.contentEncoding.toLowerCase())
-      || response.body.byteLength === 0 || response.body.byteLength > limits.maximumBytes) failMetadata();
+    if (response.status !== 200) failDiagnostic('http_status_rejected');
+    if (response.redirected || response.finalUrl !== url) failDiagnostic('redirect_or_url_rejected');
+    if (!['application/json', 'application/vnd.npm.install-v1+json']
+      .includes(response.contentType.toLowerCase().split(';', 1)[0] ?? '')) failDiagnostic('content_type_rejected');
+    if (!['', 'identity'].includes(response.contentEncoding.toLowerCase())) failDiagnostic('content_encoding_rejected');
+    if (response.body.byteLength === 0 || response.body.byteLength > limits.maximumBytes) failDiagnostic('response_size_rejected');
     let text: string;
-    try { text = new TextDecoder('utf-8', { fatal: true }).decode(response.body); } catch { failMetadata(); }
-    const document = parseStrictJsonDocument(text);
-    if (!isRecord(document) || document.name !== packageName) failMetadata();
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(response.body); } catch { failDiagnostic('utf8_rejected'); }
+    let document: unknown;
+    try { document = parseStrictJsonDocument(text); } catch { failDiagnostic('json_rejected'); }
+    if (!isRecord(document) || document.name !== packageName) failDiagnostic('identity_rejected');
     return Object.freeze({ ...response, body: Uint8Array.from(response.body) });
   }
 }
@@ -247,9 +280,13 @@ export type AuthenticatedHardenedBrokerLedger = Readonly<{
  * paths, package names, transport details and response content.
  */
 export type AuthenticatedHardenedBrokerFailure = Readonly<{
-  failureVersion: 1;
+  failureVersion: 2;
   planHash: string;
   causeCode: 'graph_metadata_invalid' | 'graph_metadata_incomplete';
+  diagnosticVersion: 1;
+  predicate: HardenedBrokerFailurePredicate;
+  /** Already-reserved broker request ordinal; never an audit_events sequence. */
+  requestOrdinal: number | null;
   reservedRequestCount: number;
   activeRequestCount: number;
   committedResponseCount: number;
@@ -329,7 +366,7 @@ export class HardenedMetadataBrokerAuthority {
 
   async arm(opaque: object): Promise<void> {
     const session = this.#session(opaque);
-    if (session.state !== 'disarmed') failMetadata();
+    if (session.state !== 'disarmed') failDiagnostic('session_not_armed');
     if (!session.startLeaseVerifier.consumeStartLease(
       session.startLease, 'broker_arm', session.monotonicNow(),
     )) failMetadata();
@@ -344,21 +381,24 @@ export class HardenedMetadataBrokerAuthority {
     try {
       packageName = parseLocalRequest(method, path, headers, session.capsule.routeToken);
       sequence = reserve(session, packageName);
-      await session.audit.record('metadata_request_started', { sequence, packageName });
-      if (session.state !== 'armed') failMetadata();
+      try { await session.audit.record('metadata_request_started', { sequence, packageName }); }
+      catch { failDiagnostic('request_intent_not_durable', 'stage_audit_incomplete'); }
+      if (session.state !== 'armed') failDiagnostic('session_not_armed');
       const response = await session.transport.fetchPackage(packageName, {
         timeoutMs: session.plan.limits.broker.requestTimeoutMs,
         maximumBytes: session.plan.limits.broker.responseBytes,
       }, session.controller.signal);
-      if (session.state !== 'armed' || session.controller.signal.aborted) failMetadata();
+      if (session.state !== 'armed' || session.controller.signal.aborted) failDiagnostic('session_not_armed');
       const nextCommitted = session.committedBytes + response.body.byteLength;
-      if (nextCommitted > session.plan.limits.broker.aggregateResponseBytes) failMetadata();
-      await session.audit.record('metadata_response_validated', {
-        sequence,
-        packageName,
-        responseBytes: response.body.byteLength,
-      });
-      if (session.state !== 'armed') failMetadata();
+      if (nextCommitted > session.plan.limits.broker.aggregateResponseBytes) failDiagnostic('unclassified');
+      try {
+        await session.audit.record('metadata_response_validated', {
+          sequence,
+          packageName,
+          responseBytes: response.body.byteLength,
+        });
+      } catch { failDiagnostic('response_validation_not_durable', 'stage_audit_incomplete'); }
+      if (session.state !== 'armed') failDiagnostic('session_not_armed');
       const entry = Object.freeze({
         sequence,
         packageName,
@@ -371,7 +411,7 @@ export class HardenedMetadataBrokerAuthority {
       session.reservedBytes += response.body.byteLength;
       return Uint8Array.from(response.body);
     } catch (error) {
-      await this.#fail(session, error);
+      await this.#fail(session, error, sequence ?? null);
       if (error instanceof PackageStageError) throw error;
       throw new PackageStageError('graph_metadata_invalid');
     } finally {
@@ -383,7 +423,7 @@ export class HardenedMetadataBrokerAuthority {
     const session = this.#session(opaque);
     if (session.state !== 'armed' || session.activeRequests !== 0 || session.entries.length === 0
       || session.entries.length !== session.startedRequests) {
-      await this.#fail(session, new PackageStageError('graph_metadata_incomplete'));
+      await this.#fail(session, diagnosticError('broker_incomplete', 'graph_metadata_incomplete'), null);
       failMetadata();
     }
     session.state = 'complete';
@@ -402,7 +442,7 @@ export class HardenedMetadataBrokerAuthority {
   }
 
   async abort(opaque: object): Promise<void> {
-    await this.#fail(this.#session(opaque), new PackageStageError('graph_metadata_invalid'));
+    await this.#fail(this.#session(opaque), diagnosticError('listener_request_rejected'), null);
   }
 
   /** The live owner may claim a failure once; copied values and replays have no authority. */
@@ -422,13 +462,17 @@ export class HardenedMetadataBrokerAuthority {
     return typeof value === 'object' && value !== null && this.#ledgers.has(value);
   }
 
-  async #fail(session: BrokerSession, cause: unknown): Promise<void> {
+  async #fail(session: BrokerSession, cause: unknown, requestOrdinal: number | null = null): Promise<void> {
     if (session.state === 'incomplete' || session.state === 'failing' || session.state === 'complete') return;
     session.state = 'failing';
+    const diagnostic = ownedDiagnosticError(cause);
     const unsigned = deepFreeze({
-      failureVersion: 1 as const,
+      failureVersion: 2 as const,
       planHash: session.plan.planHash,
       causeCode: failureCause(cause),
+      diagnosticVersion: 1 as const,
+      predicate: FAILURE_TAGS.get(diagnostic)!,
+      requestOrdinal,
       reservedRequestCount: session.startedRequests,
       activeRequestCount: session.activeRequests,
       committedResponseCount: session.entries.length,
@@ -452,12 +496,13 @@ export class HardenedMetadataBrokerAuthority {
 }
 
 function reserve(session: BrokerSession, packageName: string): number {
-  if (session.state !== 'armed') failMetadata();
+  if (session.state !== 'armed') failDiagnostic('session_not_armed');
   const limits = session.plan.limits.broker;
-  if (session.startedRequests >= limits.totalRequests || session.activeRequests >= limits.concurrentRequests) failMetadata();
+  if (session.startedRequests >= limits.totalRequests) failDiagnostic('total_request_limit');
+  if (session.activeRequests >= limits.concurrentRequests) failDiagnostic('concurrent_request_limit');
   const newName = !session.names.has(packageName);
-  if (newName && session.names.size >= limits.uniquePackageNames) failMetadata();
-  if (session.reservedBytes + limits.responseBytes > limits.aggregateResponseBytes) failMetadata();
+  if (newName && session.names.size >= limits.uniquePackageNames) failDiagnostic('unique_name_limit');
+  if (session.reservedBytes + limits.responseBytes > limits.aggregateResponseBytes) failDiagnostic('aggregate_reservation_limit');
   session.startedRequests += 1;
   session.activeRequests += 1;
   session.reservedBytes += limits.responseBytes;
@@ -466,16 +511,16 @@ function reserve(session: BrokerSession, packageName: string): number {
 }
 
 function parseLocalRequest(method: string, path: string, headers: Readonly<Record<string, string | undefined>>, token: string): string {
-  if (method !== 'GET' || path.includes('?') || path.includes('#') || hasSensitiveHeader(headers)) failMetadata();
+  if (method !== 'GET' || path.includes('?') || path.includes('#') || hasSensitiveHeader(headers)) failDiagnostic('request_route_rejected');
   const expectedPrefix = `/${token}/`;
   const actualPrefix = path.slice(0, expectedPrefix.length);
-  if (!safeEqual(actualPrefix, expectedPrefix)) failMetadata();
+  if (!safeEqual(actualPrefix, expectedPrefix)) failDiagnostic('request_route_rejected');
   const encoded = path.slice(expectedPrefix.length);
-  if (encoded.length === 0 || encoded.includes('/')) failMetadata();
+  if (encoded.length === 0 || encoded.includes('/')) failDiagnostic('request_route_rejected');
   let name: string;
-  try { name = decodeURIComponent(encoded); } catch { failMetadata(); }
+  try { name = decodeURIComponent(encoded); } catch { failDiagnostic('request_route_rejected'); }
   const canonical = name.startsWith('@') ? name.replace('/', '%2f') : name;
-  if (!PACKAGE_NAME.test(name) || encoded !== canonical) failMetadata();
+  if (!PACKAGE_NAME.test(name) || encoded !== canonical) failDiagnostic('request_route_rejected');
   return name;
 }
 
@@ -697,7 +742,7 @@ async function resolveWithDeadline(
   signal: AbortSignal,
   timeoutMs: number,
 ): Promise<readonly ResolvedAddress[]> {
-  if (signal.aborted) failMetadataIncomplete();
+  if (signal.aborted) failDiagnostic('dns_incomplete', 'graph_metadata_incomplete');
   return await new Promise((resolvePromise, reject) => {
     let settled = false;
     const finishError = () => {
@@ -705,7 +750,7 @@ async function resolveWithDeadline(
       settled = true;
       clearTimeout(timeout);
       signal.removeEventListener('abort', finishError);
-      reject(new PackageStageError('graph_metadata_incomplete'));
+      reject(diagnosticError('dns_incomplete', 'graph_metadata_incomplete'));
     };
     const timeout = setTimeout(finishError, timeoutMs);
     timeout.unref();
@@ -722,6 +767,30 @@ async function resolveWithDeadline(
 
 function failMetadata(): never { throw new PackageStageError('graph_metadata_invalid'); }
 function failMetadataIncomplete(): never { throw new PackageStageError('graph_metadata_incomplete'); }
+
+function diagnosticError(
+  predicate: HardenedBrokerFailurePredicate,
+  code: 'graph_metadata_invalid' | 'graph_metadata_incomplete' | 'stage_audit_incomplete' = 'graph_metadata_invalid',
+): PackageStageError {
+  const error = new PackageStageError(code);
+  FAILURE_TAGS.set(error, predicate);
+  return error;
+}
+
+function failDiagnostic(
+  predicate: HardenedBrokerFailurePredicate,
+  code: 'graph_metadata_invalid' | 'graph_metadata_incomplete' | 'stage_audit_incomplete' = 'graph_metadata_invalid',
+): never {
+  throw diagnosticError(predicate, code);
+}
+
+function ownedDiagnosticError(cause: unknown): PackageStageError {
+  if (typeof cause === 'object' && cause !== null) {
+    if (FAILURE_TAGS.has(cause)) return cause as PackageStageError;
+  }
+  // The fallback is created and tagged here; no caller value is projected.
+  return diagnosticError('unclassified', failureCause(cause));
+}
 
 function failureCause(cause: unknown): 'graph_metadata_invalid' | 'graph_metadata_incomplete' {
   return cause instanceof PackageStageError && cause.code === 'graph_metadata_incomplete'

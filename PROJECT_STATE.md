@@ -13,10 +13,18 @@ its lingering disarmed broker listener exposed a process-liveness defect. The co
 listener on deny, expiry and cancellation. A separately approved disposable v2 attempt observed public metadata
 and a lock-only npm child, then naturally exited in the conservative quarantine path (exit 5): no candidate or
 Dashboard-state output remained. Its immutable audit evidence records six validated metadata requests and four
-additional starts without validation; the product terminal sequence is incomplete and is not replayed. The local
-uncommitted broker-latch correction keeps `genesis_incomplete` out of the shared audit gate, hands one
+additional starts without validation; the product terminal sequence is incomplete and is not replayed. The
+broker-latch correction committed and pushed at `c0b48b6` keeps `genesis_incomplete` out of the shared audit gate, hands one
 authenticated private bounded failure summary to the live owner, and waits for process/listener observation before
-that owner writes the existing product terminal outcome. See
+that owner writes the existing product terminal outcome. A separately approved v4 run confirmed that ownership:
+the product terminal sequence records npm cancellation, listener drain, one incomplete outcome and completion after
+10 metadata starts and six validations. The last four starts (`ajv`, `zod`, `cors`, `hono`) do not identify the
+initiating failure: a fifth concurrent request or invalid route can fail before an intent record and abort those
+four transports. Three network-free tests reproduce the same safe counts and ordered intents with distinct
+initiating conditions. The exact v4 predicate remains unknown. The locally implemented, user-approved v5
+diagnostic checkpoint in `docs/graph-genesis-v5-private-diagnostics-design.md` adds an authenticated first-failure
+predicate and one bounded local stderr projection without receipt/audit schema changes or relaxed checks.
+It is covered by synthetic broker, owner, child-exit and broken-pipe tests; no v5 execution has been performed. See also
 `docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on

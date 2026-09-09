@@ -7,10 +7,19 @@ external read, npm, candidate output or package effect; its disarmed broker list
 correction drains that listener before Dashboard teardown. A separately approved disposable v2 run observed public
 metadata and a lock-only npm child, then naturally exited through the conservative quarantine path (exit 5), with no
 candidate or Dashboard-state output left behind. Its immutable audit evidence has six validated metadata requests and
-four further starts without validation; it has no replayed terminal outcome. The current local uncommitted network-free
-correction latches the first broker failure in a one-time authenticated private summary, never writes
+four further starts without validation; it has no replayed terminal outcome. The correction committed and pushed
+at `c0b48b6` latches the first broker failure in a one-time authenticated private summary, never writes
 `genesis_incomplete` from the broker, and leaves the live owner to observe the process terminal and listener drain before
-using the existing product terminal transaction. No new external execution is authorized.
+using the existing product terminal transaction. A separately approved v4 run verified that terminal sequence: after
+10 metadata request starts and six validations, it observed npm cancellation, listener drain, one incomplete product
+outcome and execution completion. The remaining `graph_metadata_invalid` cannot be attributed to the final four
+transports from their intent records alone. Local route validation and reservation happen before intent logging:
+a fifth concurrent request at the four-request limit can abort all four without getting its own intent record.
+Three synthetic tests reproduce the same 10 starts, six validations and 644145 bytes via concurrency, route and
+transport failures. They establish ambiguity, not the v4 root cause. The user-approved network-free implementation in
+`graph-genesis-v5-private-diagnostics-design.md` adds owned predicate tags, nullable broker request ordinals and one
+bounded local stderr line after terminal observation, listener drain and terminal audit attempt. Production checks and
+receipt/audit schemas remain unchanged; no v5 run occurred.
 Architecture-check baseline: `6108936` (`feat: add production graph genesis composition`).
 Production-owner implementation baseline: `7c15130` (`feat: add fail-closed graph genesis readiness`).
 

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { writeSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -43,6 +44,7 @@ import {
   type HardenedGraphGenesisPlan,
 } from './graph-genesis-hardening.js';
 import { classifyGraphGenesisFailure, GraphGenesisLivePhaseAuthority } from './graph-genesis-live-state.js';
+import { emitGraphGenesisDiagnostic } from './graph-genesis-diagnostics.js';
 import {
   BoundedNpmPublicMetadataTransport,
   HardenedLoopbackBrokerListener,
@@ -455,8 +457,10 @@ export async function runExactProductionGraphGenesisLive(
     }
     const auditPersistenceFailure = safeErrorCode(error) === 'stage_audit_incomplete';
     let terminalUnknown = terminalCommitted || terminalCommitAttempted || auditPersistenceFailure || rejectedBrokerFailure;
+    let failureTerminalAttempted = false;
     if (!auditPersistenceFailure && !terminalCommitAttempted && audit !== undefined
       && executionAudit?.events.includes('npm_spawn_started') === true) {
+      failureTerminalAttempted = true;
       try {
         audit.finalizeGraphGenesisOutcome({
           metadata: metadata ?? { externalReadStatus: 'not_started', requestCount: 0, uniquePackageCount: 0, responseBytes: 0 },
@@ -475,7 +479,13 @@ export async function runExactProductionGraphGenesisLive(
         }, externalRead ? 'incomplete_external_read' : controller.signal.aborted ? 'cancelled' : 'execution_error');
       } catch { terminalUnknown = true; }
     } else if (!auditPersistenceFailure && !terminalCommitAttempted && audit !== undefined) {
+      failureTerminalAttempted = true;
       try { audit.markFailed(safeErrorCode(error)); } catch { terminalUnknown = true; }
+    }
+    if (brokerFailure !== undefined && failureTerminalAttempted
+      && executionAudit?.events.includes('npm_terminal_observed') === true
+      && executionAudit.events.includes('listener_drained') === true) {
+      emitGraphGenesisDiagnostic(brokerFailure, (line) => writeSync(2, line, null, 'utf8'));
     }
     try { auditSource?.database.close(); } catch { terminalUnknown = true; }
     auditSource = undefined;

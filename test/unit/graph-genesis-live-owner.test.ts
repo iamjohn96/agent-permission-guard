@@ -1,10 +1,13 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openAuditDatabase, type AuditDatabase } from '../../src/db/database.js';
+import { emitGraphGenesisDiagnostic } from '../../src/stage/graph-genesis-diagnostics.js';
+import type { AuthenticatedHardenedBrokerFailure } from '../../src/stage/graph-genesis-network.js';
 import {
   GRAPH_GENESIS_LIVE_PHASES,
   classifyGraphGenesisFailure,
@@ -135,7 +138,73 @@ describe('Exact Production Graph Genesis owner boundary', () => {
     expect(source).toContain('errorCode: brokerFailure?.causeCode ?? safeErrorCode(error)');
     expect(source).toContain("const auditPersistenceFailure = safeErrorCode(error) === 'stage_audit_incomplete';");
   });
+
+  it('emits one bounded redacted diagnostic only through the owner failure path', () => {
+    const writes: string[] = [];
+    const failure = diagnosticFailure({
+      requestOrdinal: 7,
+      // Deliberately foreign fields must never be projected by the allowlist.
+      url: 'https://registry.example.invalid/secret', message: 'secret stack', packageName: 'private-package',
+    });
+    expect(emitGraphGenesisDiagnostic(failure, (line) => writes.push(line))).toBe(true);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatch(/^\[apg\] graph-genesis-diagnostic /u);
+    expect(Buffer.byteLength(writes[0]!, 'utf8')).toBeLessThanOrEqual(1024);
+    expect(writes[0]).not.toContain('registry.example.invalid');
+    expect(writes[0]).not.toContain('private-package');
+    expect(writes[0]).not.toContain('secret stack');
+    expect(emitGraphGenesisDiagnostic(failure, () => { throw new Error('synthetic broken pipe'); })).toBe(false);
+    expect(emitGraphGenesisDiagnostic(diagnosticFailure({ planHash: 'a'.repeat(2_000) }), (line) => writes.push(line))).toBe(false);
+    expect(writes).toHaveLength(1);
+
+    const source = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live.ts'), 'utf8');
+    const terminalAttempt = source.indexOf('failureTerminalAttempted = true;');
+    const diagnostic = source.indexOf('emitGraphGenesisDiagnostic(brokerFailure');
+    expect(terminalAttempt).toBeGreaterThan(-1);
+    expect(diagnostic).toBeGreaterThan(terminalAttempt);
+  });
+
+  it.runIf(existsSync(join(process.cwd(), 'dist/src/stage/graph-genesis-diagnostics.js')))(
+    'keeps a synthetic diagnostic child naturally exiting with a closed stderr descriptor',
+    () => {
+      const fixture = join(process.cwd(), 'test/fixtures/graph-genesis-diagnostic-child.mjs');
+      const normal = spawnSync(process.execPath, [fixture], { encoding: 'utf8' });
+      expect(normal.status).toBe(0);
+      expect(normal.stderr).toContain('[apg] graph-genesis-diagnostic ');
+      const broken = spawnSync(process.execPath, [fixture, 'closed-fd'], { encoding: 'utf8' });
+      expect(broken.status).toBe(0);
+      expect(broken.stderr).toBe('');
+    },
+  );
+
+  it.runIf(existsSync(join(process.cwd(), 'dist/src/stage/graph-genesis-diagnostics.js')))(
+    'keeps a synthetic diagnostic child naturally exiting after its stderr pipe closes',
+    async () => {
+      const fixture = join(process.cwd(), 'test/fixtures/graph-genesis-diagnostic-child.mjs');
+      const child = spawn(process.execPath, [fixture, 'broken-pipe'], { stdio: ['ignore', 'ignore', 'pipe'] });
+      child.stderr?.destroy();
+      const exitCode = await new Promise<number | null>((resolveExit) => child.once('close', (code) => resolveExit(code)));
+      expect(exitCode).toBe(0);
+    },
+  );
 });
+
+function diagnosticFailure(extra: Record<string, unknown> = {}): AuthenticatedHardenedBrokerFailure {
+  return {
+    failureVersion: 2,
+    planHash: 'a'.repeat(64),
+    causeCode: 'graph_metadata_invalid',
+    diagnosticVersion: 1,
+    predicate: 'http_status_rejected',
+    requestOrdinal: null,
+    reservedRequestCount: 10,
+    activeRequestCount: 4,
+    committedResponseCount: 6,
+    committedResponseBytes: 644145,
+    failureDigest: 'b'.repeat(64),
+    ...extra,
+  } as AuthenticatedHardenedBrokerFailure;
+}
 
 class SyntheticFullFlowFixture implements SyntheticGraphGenesisFullFlowAdapter {
   readonly implementationKind = 'synthetic' as const;

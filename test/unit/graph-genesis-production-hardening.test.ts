@@ -204,6 +204,146 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       .rejects.toMatchObject({ code: 'graph_metadata_invalid' });
   });
 
+  it.each([
+    ['dns result', [{ address: '127.0.0.1', family: 4 as const }], packument('fixture'), 'dns_result_rejected'],
+    ['HTTP status', [{ address: '104.16.0.1', family: 4 as const }], { ...packument('fixture'), status: 503 }, 'http_status_rejected'],
+    ['redirect', [{ address: '104.16.0.1', family: 4 as const }], { ...packument('fixture'), redirected: true }, 'redirect_or_url_rejected'],
+    ['content type', [{ address: '104.16.0.1', family: 4 as const }], { ...packument('fixture'), contentType: 'text/plain' }, 'content_type_rejected'],
+    ['content encoding', [{ address: '104.16.0.1', family: 4 as const }], { ...packument('fixture'), contentEncoding: 'gzip' }, 'content_encoding_rejected'],
+    ['response size', [{ address: '104.16.0.1', family: 4 as const }], { ...packument('fixture'), body: Buffer.alloc(1025, 0x20) }, 'response_size_rejected'],
+    ['UTF-8', [{ address: '104.16.0.1', family: 4 as const }], { ...packument('fixture'), body: Buffer.from([0xff]) }, 'utf8_rejected'],
+    ['JSON', [{ address: '104.16.0.1', family: 4 as const }], { ...packument('fixture'), body: Buffer.from('{"name":') }, 'json_rejected'],
+    ['identity', [{ address: '104.16.0.1', family: 4 as const }], { ...packument('fixture'), body: Buffer.from('{"name":"other"}') }, 'identity_rejected'],
+  ] as const)('latches the owned %s predicate without broadening metadata acceptance', async (_name, addresses, response, predicate) => {
+    const failure = await brokerFailureFromSyntheticTransport(addresses, response as ReturnType<typeof packument>);
+    expect(failure).toMatchObject({
+      causeCode: 'graph_metadata_invalid', predicate, requestOrdinal: 1,
+      reservedRequestCount: 1, activeRequestCount: 1, committedResponseCount: 0,
+    });
+  });
+
+  it('latches DNS and local pinned-HTTPS incomplete boundaries without external traffic', async () => {
+    const dnsFailure = await brokerFailureFromTransport(new BoundedNpmPublicMetadataTransport(
+      { async resolve() { throw new Error('synthetic resolver failure'); } },
+      client(() => packument('fixture')),
+    ));
+    expect(dnsFailure).toMatchObject({ predicate: 'dns_incomplete', requestOrdinal: 1, causeCode: 'graph_metadata_incomplete' });
+
+    const identity = ephemeralTlsIdentity('registry.npmjs.org');
+    let mode: 'wire' | 'reset' = 'wire';
+    const server = createHttpsServer({ key: identity.privateKeyPem, cert: identity.certificate }, (request, response) => {
+      if (mode === 'reset') { request.socket.destroy(); return; }
+      const body = Buffer.alloc(2048, 0x20);
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': body.byteLength });
+      response.end(body);
+    });
+    const port = await listenHttps(server);
+    try {
+      const client = createLocalTlsPinnedHttpsClientForTest(port, identity.certificate);
+      const wireFailure = await brokerFailureFromTransport(new BoundedNpmPublicMetadataTransport(
+        resolver([{ address: '104.16.0.1', family: 4 }]), client,
+      ), { requestTimeoutMs: 1_000 });
+      expect(wireFailure).toMatchObject({ predicate: 'wire_size_rejected', requestOrdinal: 1, causeCode: 'graph_metadata_incomplete' });
+      mode = 'reset';
+      const httpsFailure = await brokerFailureFromTransport(new BoundedNpmPublicMetadataTransport(
+        resolver([{ address: '104.16.0.1', family: 4 }]), client,
+      ), { requestTimeoutMs: 1_000 });
+      expect(httpsFailure).toMatchObject({ predicate: 'https_incomplete', requestOrdinal: 1, causeCode: 'graph_metadata_incomplete' });
+    } finally { await closeHttps(server); }
+  });
+
+  it('latches owned reservation, completion and unclassified predicates without a synthetic tag injection API', async () => {
+    const cases = [
+      ['session_not_armed', {}, false],
+      ['total_request_limit', { totalRequests: 1, uniquePackageNames: 1 }, true],
+      ['unique_name_limit', { uniquePackageNames: 1 }, true],
+      ['broker_incomplete', {}, 'complete'],
+      ['unclassified', {}, 'foreign'],
+    ] as const;
+    for (const [predicate, overrides, mode] of cases) {
+      const fixture = await brokerFixture(overrides);
+      const transport: HardenedPublicMetadataTransport = {
+        implementationKind: 'synthetic',
+        async fetchPackage(name) {
+          if (mode === 'foreign') {
+            throw Object.assign(new Error('caller-controlled predicate must not project'), {
+              predicate: 'identity_rejected', requestOrdinal: 999,
+            });
+          }
+          return packument(name);
+        },
+      };
+      const session = prepareBrokerSession(fixture, transport);
+      if (mode === 'complete') {
+        await fixture.broker.arm(session);
+        await expect(fixture.broker.complete(session)).rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+      } else if (mode === false) {
+        await expect(fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/fixture`, {}))
+          .rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+      } else if (mode === 'foreign') {
+        await fixture.broker.arm(session);
+        await expect(fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/fixture`, {}))
+          .rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+      } else {
+        await fixture.broker.arm(session);
+        await fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/fixture`, {});
+        await expect(fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/second`, {}))
+          .rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+      }
+      const failure = fixture.broker.claimFailure(session);
+      expect(failure).toMatchObject({ predicate });
+      expect(failure?.requestOrdinal).toBe(predicate === 'unclassified' ? 1 : null);
+      expect(fixture.broker.authenticatesFailure({ ...failure! })).toBe(false);
+    }
+  });
+
+  it('latches concurrent and aggregate reservation limits before a durable request intent', async () => {
+    for (const [predicate, overrides] of [
+      ['concurrent_request_limit', { concurrentRequests: 1, aggregateResponseBytes: 4096 }],
+      ['aggregate_reservation_limit', { concurrentRequests: 2, responseBytes: 1024, aggregateResponseBytes: 1024 }],
+    ] as const) {
+      const fixture = await brokerFixture(overrides);
+      let release!: () => void;
+      const pending = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+      const transport: HardenedPublicMetadataTransport = {
+        implementationKind: 'synthetic',
+        async fetchPackage(_name, _limits, signal) {
+          signal.addEventListener('abort', () => release(), { once: true });
+          await pending;
+          throw new Error('synthetic cancellation');
+        },
+      };
+      const session = prepareBrokerSession(fixture, transport);
+      await fixture.broker.arm(session);
+      const first = fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/fixture`, {});
+      await Promise.resolve();
+      await expect(fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/second`, {}))
+        .rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+      await expect(first).rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+      const failure = fixture.broker.claimFailure(session);
+      expect(failure).toMatchObject({ predicate, requestOrdinal: null, reservedRequestCount: 1 });
+      expect(fixture.sink.events.filter((event) => event.name === 'metadata_request_started')).toHaveLength(1);
+    }
+  });
+
+  it.each([
+    ['metadata_request_started', 'request_intent_not_durable'],
+    ['metadata_response_validated', 'response_validation_not_durable'],
+  ] as const)('keeps audit durability failure conservative while latching %s', async (event, predicate) => {
+    const fixture = await brokerFixture();
+    const audit = new GraphGenesisAuditGate(fixture.plan.prepared.plan.planHash, new FailingAuditSink(event));
+    await audit.record('authorization_finalized');
+    const session = prepareBrokerSession(fixture, {
+      implementationKind: 'synthetic',
+      async fetchPackage(name) { return packument(name); },
+    }, audit);
+    await fixture.broker.arm(session);
+    await expect(fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/fixture`, {}))
+      .rejects.toMatchObject({ code: 'stage_audit_incomplete' });
+    const failure = fixture.broker.claimFailure(session);
+    expect(failure).toMatchObject({ predicate, requestOrdinal: 1, causeCode: 'graph_metadata_invalid' });
+  });
+
   it('exercises pinned TLS hostname verification and streaming limits on a memory-only local fixture', async () => {
     const identity = ephemeralTlsIdentity('registry.npmjs.org');
     let observedHost = '';
@@ -368,6 +508,99 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     expect(JSON.stringify(failure)).not.toContain('deterministic private transport failure');
   });
 
+  it.each(['concurrency', 'route', 'transport'] as const)(
+    'shows that the v4 metadata counts do not identify the initiating predicate: %s',
+    async (trigger) => {
+      const fixture = await brokerFixture({
+        uniquePackageNames: 128, totalRequests: 256, concurrentRequests: 4,
+        responseBytes: 4 * 1024 * 1024, aggregateResponseBytes: 64 * 1024 * 1024,
+      });
+      const completedNames = ['@modelcontextprotocol/server-filesystem', 'diff', 'glob', 'minimatch',
+        '@modelcontextprotocol/sdk', '@cfworker/json-schema'];
+      const completedSizes = [17917, 67741, 199194, 169442, 118002, 71849];
+      const pendingNames = ['ajv', 'zod', 'cors', 'hono'];
+      let dispatches = 0;
+      let abortNotifications = 0;
+      let pendingAborts = 0;
+      let allPending!: () => void;
+      const pendingReady = new Promise<void>((resolvePromise) => { allPending = resolvePromise; });
+      const failingTransport = new BoundedNpmPublicMetadataTransport(
+        resolver([{ address: '104.16.0.1', family: 4 }]),
+        client(async () => {
+          await pendingReady;
+          return { ...packument('ajv'), status: 500 };
+        }),
+      );
+      const transport: HardenedPublicMetadataTransport = {
+        implementationKind: 'synthetic',
+        async fetchPackage(name, _limits, signal) {
+          dispatches += 1;
+          const completedIndex = completedNames.indexOf(name);
+          if (completedIndex >= 0) {
+            const response = packument(name);
+            // Entirely synthetic JSON, padded to the observed safe byte counts; no registry body is reused.
+            const body = Buffer.alloc(completedSizes[completedIndex]!, 0x20);
+            response.body.copy(body);
+            return { ...response, body };
+          }
+          if (name === 'ajv' && trigger === 'transport') {
+            return await failingTransport.fetchPackage(name, { timeoutMs: 100, maximumBytes: 4 * 1024 * 1024 }, signal);
+          }
+          return await new Promise<never>((_resolve, reject) => {
+            const abort = () => { pendingAborts += 1; reject(new Error('synthetic cancellation')); };
+            signal.addEventListener('abort', abort, { once: true });
+            if (dispatches === 10) allPending();
+          });
+        },
+      };
+      const session = fixture.broker.prepareSession({
+        plan: fixture.plan.prepared.plan, capsule: fixture.plan.prepared.capsule,
+        startLease: fixture.startLease, startLeaseVerifier: fixture.leaseAuthority,
+        audit: fixture.audit, transport, onFailure: () => { abortNotifications += 1; },
+        mode: 'synthetic', monotonicNow: () => 1,
+      });
+      await fixture.broker.arm(session);
+      const request = (name: string) => fixture.broker.handle(session, 'GET',
+        `/${fixture.plan.routeToken}/${name.replace('/', '%2f')}`, {});
+      for (const name of completedNames) await request(name);
+      const outcomes = Promise.allSettled(pendingNames.map(request));
+      await pendingReady;
+      if (trigger !== 'transport') {
+        // A failed reservation/route has no metadata_request_started event and never reaches transport.
+        await expect(request(trigger === 'concurrency' ? 'fifth' : 'fifth?invalid'))
+          .rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+      }
+      expect((await outcomes).every((outcome) => outcome.status === 'rejected')).toBe(true);
+      expect(dispatches).toBe(10);
+      expect(abortNotifications).toBe(1);
+      expect(pendingAborts).toBe(trigger === 'transport' ? 3 : 4);
+      expect(fixture.audit.metadataSummary()).toEqual({
+        externalReadStatus: 'incomplete', requestCount: 10, uniquePackageCount: 10, responseBytes: 644145,
+      });
+      const started = fixture.sink.events.filter((event) => event.name === 'metadata_request_started');
+      const validated = fixture.sink.events.filter((event) => event.name === 'metadata_response_validated');
+      expect(started.map((event) => event.payload.packageName)).toEqual([...completedNames, ...pendingNames]);
+      expect(validated.map((event) => event.payload.packageName)).toEqual(completedNames);
+      const failure = fixture.broker.claimFailure(session);
+      expect(fixture.broker.authenticatesFailure(failure)).toBe(true);
+      expect(failure).toMatchObject({
+        causeCode: 'graph_metadata_invalid', reservedRequestCount: 10, activeRequestCount: 4,
+        committedResponseCount: 6, committedResponseBytes: 644145,
+      });
+      expect(failure?.predicate).toBe({
+        concurrency: 'concurrent_request_limit',
+        route: 'request_route_rejected',
+        transport: 'http_status_rejected',
+      }[trigger]);
+      expect(failure?.requestOrdinal).toBe(trigger === 'transport' ? 7 : null);
+      expect(fixture.broker.claimFailure(session)).toBeUndefined();
+      expect(fixture.audit.events).not.toContain('genesis_incomplete');
+      await fixture.audit.record('npm_terminal_observed', { status: 'cancelled', exitCode: -1, stdoutBytes: 0, stderrBytes: 0 });
+      await fixture.audit.record('listener_drained', { acceptedHandlerCount: trigger === 'transport' ? 10 : 11 });
+      expect(fixture.audit.events.slice(-2)).toEqual(['npm_terminal_observed', 'listener_drained']);
+    },
+  );
+
   it('keeps a loopback listener disarmed until authorization and forwards only the exact route', async () => {
     const files = new RuntimeFileSnapshotAuthority();
     const trees = new RuntimeTreeSnapshotAuthority();
@@ -400,8 +633,17 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       const accepted = await fetch(`http://127.0.0.1:${port}/${plan.routeToken}/fixture`, { headers: { Connection: 'close' } });
       expect(accepted.status).toBe(200);
       expect(await accepted.json()).toMatchObject({ name: 'fixture' });
-      const rejected = await fetch(`http://127.0.0.1:${port}/${plan.routeToken}/fixture/-/fixture.tgz`);
+      const rejected = await fetch(`http://127.0.0.1:${port}/${plan.routeToken}/fixture`, {
+        headers: { authorization: 'synthetic-listener-rejection' },
+      });
       expect(rejected.status).toBe(502);
+      const failure = broker.claimFailure(session);
+      expect(failure).toMatchObject({
+        predicate: 'listener_request_rejected', requestOrdinal: null,
+        reservedRequestCount: 1, activeRequestCount: 0, committedResponseCount: 1,
+      });
+      expect(broker.authenticatesFailure(failure)).toBe(true);
+      expect(broker.claimFailure(session)).toBeUndefined();
       const afterFailure = await fetch(`http://127.0.0.1:${port}/${plan.routeToken}/fixture`);
       expect(afterFailure.status).toBe(404);
       const drained = await listener.closeAndDrain();
@@ -743,6 +985,58 @@ async function brokerFixture(overrides: Partial<ReturnType<typeof limits>['broke
   return { plan, leaseAuthority, startLease, sink, audit, broker: new HardenedMetadataBrokerAuthority(plan.planAuthority) };
 }
 
+async function brokerFailureFromSyntheticTransport(
+  addresses: readonly { address: string; family: 4 | 6 }[],
+  response: ReturnType<typeof packument>,
+) {
+  const transport = new BoundedNpmPublicMetadataTransport(resolver(addresses), client(() => response));
+  return await brokerFailureFromTransport(transport);
+}
+
+function prepareBrokerSession(
+  fixture: Awaited<ReturnType<typeof brokerFixture>>,
+  transport: HardenedPublicMetadataTransport,
+  audit: GraphGenesisAuditGate = fixture.audit,
+): object {
+  return fixture.broker.prepareSession({
+    plan: fixture.plan.prepared.plan,
+    capsule: fixture.plan.prepared.capsule,
+    startLease: fixture.startLease,
+    startLeaseVerifier: fixture.leaseAuthority,
+    audit,
+    transport,
+    onFailure: () => undefined,
+    mode: 'synthetic',
+    monotonicNow: () => 1,
+  });
+}
+
+async function brokerFailureFromTransport(
+  transport: HardenedPublicMetadataTransport,
+  overrides: Partial<ReturnType<typeof limits>['broker']> = {},
+  audit?: GraphGenesisAuditGate,
+) {
+  const fixture = await brokerFixture(overrides);
+  const resolvedAudit = audit ?? fixture.audit;
+  const session = fixture.broker.prepareSession({
+    plan: fixture.plan.prepared.plan,
+    capsule: fixture.plan.prepared.capsule,
+    startLease: fixture.startLease,
+    startLeaseVerifier: fixture.leaseAuthority,
+    audit: resolvedAudit,
+    transport,
+    onFailure: () => undefined,
+    mode: 'synthetic',
+    monotonicNow: () => 1,
+  });
+  await fixture.broker.arm(session);
+  await expect(fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/fixture`, {}))
+    .rejects.toBeInstanceOf(Error);
+  const failure = fixture.broker.claimFailure(session);
+  expect(fixture.broker.authenticatesFailure(failure)).toBe(true);
+  return failure!;
+}
+
 function limits() {
   return {
     broker: { uniquePackageNames: 2, totalRequests: 4, concurrentRequests: 2, responseBytes: 1024, aggregateResponseBytes: 4096, requestTimeoutMs: 100 },
@@ -790,7 +1084,7 @@ function resolver(addresses: readonly { address: string; family: 4 | 6 }[]): Reg
   return { async resolve() { return addresses; } };
 }
 
-function client(response: (input: PinnedHttpsRequest) => ReturnType<typeof packument>): PinnedHttpsClient {
+function client(response: (input: PinnedHttpsRequest) => ReturnType<typeof packument> | Promise<ReturnType<typeof packument>>): PinnedHttpsClient {
   return { implementationKind: 'synthetic', async request(input) { return response(input); } };
 }
 
