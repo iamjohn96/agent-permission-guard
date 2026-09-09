@@ -24,8 +24,14 @@ four transports. Three network-free tests reproduce the same safe counts and ord
 initiating conditions. The exact v4 predicate remains unknown. The locally implemented, user-approved v5
 diagnostic checkpoint in `docs/graph-genesis-v5-private-diagnostics-design.md` adds an authenticated first-failure
 predicate and one bounded local stderr projection without receipt/audit schema changes or relaxed checks.
-It is covered by synthetic broker, owner, child-exit and broken-pipe tests; no v5 execution has been performed. See also
-`docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md`.
+It is covered by synthetic broker, owner, child-exit and broken-pipe tests. The separately approved v5 live
+acceptance then observed `concurrent_request_limit` with a null pre-reservation ordinal, ten request starts,
+six validations and 644145 validated bytes; it quarantined with exit 5 and left no candidate or Dashboard state.
+The follow-up approved network-free checkpoint fixes npm's per-origin connection limit at four in the launch
+identity while retaining the broker's four-request fail-closed cap, no queue and no retry. It requires a fresh
+review and acceptance; it does not reinterpret or reuse v1-v5 evidence. See also
+`docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md` and
+`docs/graph-genesis-v5-maxsockets-architecture-check.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,

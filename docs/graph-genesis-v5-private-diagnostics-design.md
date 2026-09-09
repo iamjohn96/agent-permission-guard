@@ -1,8 +1,10 @@
 # Graph Genesis v5 private failure diagnostics
 
-Status: network-free implementation complete locally under the user's 2026-09-09 approval; ready for supervisor review.
+Status: v5 private diagnostics implementation and its separately approved live acceptance are complete; the
+post-v5 `--maxsockets=4` checkpoint is network-free only and requires fresh review/acceptance.
 Baseline: `c0b48b62182c055cd2c79d1846cae0663a0e2e03`.
-This checkpoint changes diagnostic source, synthetic tests and documentation. It does not run v5.
+This checkpoint changed diagnostic source, synthetic tests and documentation before the separately approved v5
+acceptance. It does not authorize a later rerun.
 
 ## Evidence and corrected inference
 
@@ -125,9 +127,9 @@ Completed and retained verification requirements:
 ## Review and eventual v5 run boundary
 
 The current result is a concrete local implementation and reproduction evidence, not a claim that v4's exact
-cause is known or that a corrected live build has been accepted. Supervisor review should review the bounded
-stderr surface before any v5 run. Any eventual v5 run must use that reviewed build,
-fresh absent operator paths, and a fresh exact execution-envelope approval; no v1-v4 evidence is reused.
+cause is known. The subsequent v5 acceptance observed a bounded concurrency predicate but does not authorize a
+rerun. Any later run must use a reviewed changed build, fresh absent operator paths and a fresh exact
+execution-envelope approval; no v1-v5 evidence is reused.
 Do not treat the earlier generic design approval as a pre-consumed Dashboard approval or permission to
 run an unspecified command against an unspecified DB/output identity.
 

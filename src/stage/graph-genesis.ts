@@ -358,7 +358,7 @@ export function buildGraphGenesisLaunch(input: Readonly<{
     `--allow-fs-read=${input.npmRuntimeRoot}`, `--allow-fs-read=${workspace}`,
     `--allow-fs-write=${workspace}`, input.npmCliPath,
     'install', `${EXACT_TARGET_NAME}@${EXACT_TARGET_VERSION}`, '--package-lock-only', '--save-exact',
-    '--ignore-scripts', '--audit=false', '--fund=false', '--update-notifier=false', '--workspaces=false',
+    '--maxsockets=4', '--ignore-scripts', '--audit=false', '--fund=false', '--update-notifier=false', '--workspaces=false',
     '--bin-links=false', '--allow-directory=none', '--allow-file=none', '--allow-git=none',
     '--allow-remote=none', '--replace-registry-host=never',
     `--registry=http://127.0.0.1:${input.brokerPort}/${input.routeToken}/`,

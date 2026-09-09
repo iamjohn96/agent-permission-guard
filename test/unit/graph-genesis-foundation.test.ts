@@ -50,6 +50,11 @@ describe('bounded metadata-only graph genesis network-free foundation', () => {
       consequence: 'bounded_public_metadata_graph_genesis',
     });
     expect(fixture.plan.launch.args).toContain('--package-lock-only');
+    expect(fixture.plan.launch.args.filter((argument) => argument === '--maxsockets=4')).toHaveLength(1);
+    expect(fixture.plan.launch.args.indexOf('--maxsockets=4'))
+      .toBe(fixture.plan.launch.args.indexOf('--save-exact') + 1);
+    expect(fixture.plan.launch.args.indexOf('--ignore-scripts'))
+      .toBe(fixture.plan.launch.args.indexOf('--maxsockets=4') + 1);
     expect(fixture.plan.launch.args).toContain('--ignore-scripts');
     expect(fixture.plan.launch.args).not.toContain('--allow-child-process');
     expect(fixture.plan.launch.env).toEqual({

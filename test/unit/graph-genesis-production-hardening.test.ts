@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -86,6 +86,27 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
 
     expect(() => fixture.planAuthority.prepare({ ...fixture.prepareInput, allowSynthetic: false }))
       .toThrowError(expect.objectContaining({ code: 'artifact_plan_invalid' }));
+  });
+
+  it('binds the fixed four-socket launch to the plan and rejects missing, changed, or duplicate variants', async () => {
+    const fixture = await planFixture();
+    const launch = fixture.prepareInput.launch;
+    expect(launch.args.filter((argument) => argument === '--maxsockets=4')).toHaveLength(1);
+    expect(fixture.prepared.plan.limits.broker).toEqual(limits().broker);
+    const liveOwner = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live.ts'), 'utf8');
+    expect(liveOwner).toContain('uniquePackageNames: 128, totalRequests: 256, concurrentRequests: 4');
+    expect(liveOwner).toContain('responseBytes: 4 * MiB, aggregateResponseBytes: 64 * MiB, requestTimeoutMs: 10_000');
+    const variants = [
+      launch.args.filter((argument) => argument !== '--maxsockets=4'),
+      launch.args.map((argument) => argument === '--maxsockets=4' ? '--maxsockets=8' : argument),
+      [...launch.args, '--maxsockets=4'],
+    ];
+    for (const args of variants) {
+      expect(() => fixture.planAuthority.prepare({
+        ...fixture.prepareInput,
+        launch: { ...launch, args: Object.freeze(args) },
+      })).toThrowError(expect.objectContaining({ code: 'artifact_plan_invalid' }));
+    }
   });
 
   it('revalidates the exact sealed runtime and workspace before spawn', async () => {

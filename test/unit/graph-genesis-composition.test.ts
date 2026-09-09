@@ -86,6 +86,16 @@ describe('production Graph Genesis approval and execution composition foundation
         runtimeManifestDigest: '6'.repeat(64),
         containmentEvidenceDigest: fixture.prepared.plan.containmentEvidenceDigest,
       });
+      expect(prepared.envelope.launchDigest).toBe(fixture.prepared.plan.launchDigest);
+      const { launchDigest, ...legacyLaunch } = fixture.prepared.capsule.launch;
+      const legacyLaunchDigest = graphGenesisDigest({
+        ...legacyLaunch,
+        args: legacyLaunch.args.filter((argument) => argument !== '--maxsockets=4'),
+      });
+      expect(legacyLaunchDigest).not.toBe(launchDigest);
+      const { executionEnvelopeHash, ...unsignedEnvelope } = prepared.envelope;
+      expect(graphGenesisDigest({ ...unsignedEnvelope, launchDigest: legacyLaunchDigest }))
+        .not.toBe(executionEnvelopeHash);
       await expect(executionAudit.record('runtime_snapshot_complete', {
         runtimeManifestDigest: '0'.repeat(64),
       })).rejects.toMatchObject({ code: 'stage_audit_incomplete' });

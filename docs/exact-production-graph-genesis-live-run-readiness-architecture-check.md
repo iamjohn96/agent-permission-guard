@@ -207,7 +207,7 @@ The live owner reconstructs and validates the existing fixed launch vector:
 --allow-fs-write=<owned-workspace>
 <exact-npm-11.16.0-cli>
 install @modelcontextprotocol/server-filesystem@2026.7.10
---package-lock-only --save-exact --ignore-scripts
+--package-lock-only --save-exact --maxsockets=4 --ignore-scripts
 --audit=false --fund=false --update-notifier=false --workspaces=false --bin-links=false
 --allow-directory=none --allow-file=none --allow-git=none --allow-remote=none
 --replace-registry-host=never
@@ -238,6 +238,12 @@ integrity remains outside the claim.
 only the owned loopback port and workspace. The post-state must contain no tarball, `node_modules`, executable,
 package body, or unknown file. The compiler rejects `hasInstallScript`, optional/bundled/platform behavior,
 unsupported lock fields, disconnected/cyclic graphs, non-public tarball URLs, and non-SHA-512 integrity.
+
+`--maxsockets=4` is a fixed npm 11.16.0 per-origin connection cap for the one loopback registry origin. It is
+part of the authenticated launch digest, plan hash and Dashboard execution envelope; omission, substitution or
+duplication fails closed during plan preparation. It aligns npm connection pressure with the unchanged broker
+`concurrentRequests=4` cap, but it is not a separate proof of semantic HTTP request concurrency. No queue,
+retry, fallback, broker-limit increase or response/aggregate/timeout relaxation accompanies it.
 
 ## Isolated temporary project
 
