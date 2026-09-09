@@ -242,6 +242,21 @@ export type AuthenticatedHardenedBrokerLedger = Readonly<{
   ledgerDigest: string;
 }>;
 
+/**
+ * Private, one-time broker-to-owner handoff. It deliberately excludes request
+ * paths, package names, transport details and response content.
+ */
+export type AuthenticatedHardenedBrokerFailure = Readonly<{
+  failureVersion: 1;
+  planHash: string;
+  causeCode: 'graph_metadata_invalid' | 'graph_metadata_incomplete';
+  reservedRequestCount: number;
+  activeRequestCount: number;
+  committedResponseCount: number;
+  committedResponseBytes: number;
+  failureDigest: string;
+}>;
+
 type BrokerSession = {
   readonly plan: HardenedGraphGenesisPlan;
   readonly capsule: AuthenticatedGraphGenesisExecutionCapsule;
@@ -265,6 +280,9 @@ export class HardenedMetadataBrokerAuthority {
   readonly #sessions = new WeakSet<object>();
   readonly #ledgers = new WeakSet<object>();
   readonly #preparedLeases = new WeakSet<object>();
+  readonly #failures = new WeakMap<object, AuthenticatedHardenedBrokerFailure>();
+  readonly #failureSummaries = new WeakSet<object>();
+  readonly #claimedFailures = new WeakSet<object>();
 
   constructor(private readonly plans: HardenedGraphGenesisPlanAuthority) {}
 
@@ -353,7 +371,7 @@ export class HardenedMetadataBrokerAuthority {
       session.reservedBytes += response.body.byteLength;
       return Uint8Array.from(response.body);
     } catch (error) {
-      await this.#fail(session);
+      await this.#fail(session, error);
       if (error instanceof PackageStageError) throw error;
       throw new PackageStageError('graph_metadata_invalid');
     } finally {
@@ -365,7 +383,7 @@ export class HardenedMetadataBrokerAuthority {
     const session = this.#session(opaque);
     if (session.state !== 'armed' || session.activeRequests !== 0 || session.entries.length === 0
       || session.entries.length !== session.startedRequests) {
-      await this.#fail(session);
+      await this.#fail(session, new PackageStageError('graph_metadata_incomplete'));
       failMetadata();
     }
     session.state = 'complete';
@@ -384,19 +402,46 @@ export class HardenedMetadataBrokerAuthority {
   }
 
   async abort(opaque: object): Promise<void> {
-    await this.#fail(this.#session(opaque));
+    await this.#fail(this.#session(opaque), new PackageStageError('graph_metadata_invalid'));
+  }
+
+  /** The live owner may claim a failure once; copied values and replays have no authority. */
+  claimFailure(opaque: object): AuthenticatedHardenedBrokerFailure | undefined {
+    const session = this.#session(opaque);
+    const failure = this.#failures.get(session);
+    if (failure === undefined || this.#claimedFailures.has(failure)) return undefined;
+    this.#claimedFailures.add(failure);
+    return failure;
+  }
+
+  authenticatesFailure(value: unknown): value is AuthenticatedHardenedBrokerFailure {
+    return typeof value === 'object' && value !== null && this.#failureSummaries.has(value);
   }
 
   authenticatesLedger(value: unknown): value is AuthenticatedHardenedBrokerLedger {
     return typeof value === 'object' && value !== null && this.#ledgers.has(value);
   }
 
-  async #fail(session: BrokerSession): Promise<void> {
+  async #fail(session: BrokerSession, cause: unknown): Promise<void> {
     if (session.state === 'incomplete' || session.state === 'failing' || session.state === 'complete') return;
     session.state = 'failing';
+    const unsigned = deepFreeze({
+      failureVersion: 1 as const,
+      planHash: session.plan.planHash,
+      causeCode: failureCause(cause),
+      reservedRequestCount: session.startedRequests,
+      activeRequestCount: session.activeRequests,
+      committedResponseCount: session.entries.length,
+      committedResponseBytes: session.committedBytes,
+    });
+    const failure = deepFreeze({
+      ...unsigned,
+      failureDigest: sha256(canonicalJson(unsigned)),
+    });
+    this.#failureSummaries.add(failure);
+    this.#failures.set(session, failure);
     session.controller.abort();
     try { await session.onFailure(); } catch { /* terminal state still remains incomplete */ }
-    try { await session.audit.record('genesis_incomplete', { externalReadMayHaveOccurred: session.startedRequests > 0 }); } catch { /* preserve failure */ }
     session.state = 'incomplete';
   }
 
@@ -677,6 +722,11 @@ async function resolveWithDeadline(
 
 function failMetadata(): never { throw new PackageStageError('graph_metadata_invalid'); }
 function failMetadataIncomplete(): never { throw new PackageStageError('graph_metadata_incomplete'); }
+
+function failureCause(cause: unknown): 'graph_metadata_invalid' | 'graph_metadata_incomplete' {
+  return cause instanceof PackageStageError && cause.code === 'graph_metadata_incomplete'
+    ? 'graph_metadata_incomplete' : 'graph_metadata_invalid';
+}
 
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');

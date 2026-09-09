@@ -9,8 +9,14 @@ owner of runtime capture, containment, approval, audit, broker, process, output,
 reconciliation. The compiled production probe no longer depends on a test fixture. Default tests do not invoke
 the live owner; the full network-free regression is `290 passed, 3 skipped`. One disposable first command
 attempt reached Dashboard approval and expired before external read, npm, candidate output or package effect;
-its lingering disarmed broker listener exposed a process-liveness defect. The local uncommitted correction
-drains that listener on deny, expiry and cancellation. See
+its lingering disarmed broker listener exposed a process-liveness defect. The committed correction drains that
+listener on deny, expiry and cancellation. A separately approved disposable v2 attempt observed public metadata
+and a lock-only npm child, then naturally exited in the conservative quarantine path (exit 5): no candidate or
+Dashboard-state output remained. Its immutable audit evidence records six validated metadata requests and four
+additional starts without validation; the product terminal sequence is incomplete and is not replayed. The local
+uncommitted broker-latch correction keeps `genesis_incomplete` out of the shared audit gate, hands one
+authenticated private bounded failure summary to the live owner, and waits for process/listener observation before
+that owner writes the existing product terminal outcome. See
 `docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on

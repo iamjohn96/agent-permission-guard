@@ -118,6 +118,23 @@ describe('Exact Production Graph Genesis owner boundary', () => {
     expect(listenerDrain).toBeGreaterThan(rejectedApproval);
     expect(dashboardShutdown).toBeGreaterThan(listenerDrain);
   });
+
+  it('leaves terminal audit ownership with the live owner after a broker latch', () => {
+    const source = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live.ts'), 'utf8');
+    const supervisorObserved = source.indexOf('processResult = await supervisor.run({');
+    const failureClaimed = source.indexOf('const claimedBrokerFailure = broker.claimFailure(brokerSession);');
+    const listenerRecorded = source.indexOf("await authorization.executionAudit.record('listener_drained'");
+    const brokerCauseRaised = source.indexOf('if (brokerFailure !== undefined) fail(brokerFailure.causeCode);');
+    const terminalOutcome = source.indexOf('audit.finalizeGraphGenesisOutcome({');
+    expect(supervisorObserved).toBeGreaterThan(-1);
+    expect(failureClaimed).toBeGreaterThan(supervisorObserved);
+    expect(listenerRecorded).toBeGreaterThan(failureClaimed);
+    expect(brokerCauseRaised).toBeGreaterThan(listenerRecorded);
+    expect(terminalOutcome).toBeGreaterThan(brokerCauseRaised);
+    expect(source).toContain('broker.authenticatesFailure(claimedBrokerFailure)');
+    expect(source).toContain('errorCode: brokerFailure?.causeCode ?? safeErrorCode(error)');
+    expect(source).toContain("const auditPersistenceFailure = safeErrorCode(error) === 'stage_audit_incomplete';");
+  });
 });
 
 class SyntheticFullFlowFixture implements SyntheticGraphGenesisFullFlowAdapter {

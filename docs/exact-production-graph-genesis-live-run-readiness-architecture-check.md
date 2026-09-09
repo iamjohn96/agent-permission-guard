@@ -3,9 +3,14 @@
 Status: accepted on 2026-09-09; initial readiness foundation committed at `7c15130`; production owner and
 synthetic full-flow implementation committed and pushed at `592b286`; the pre-spawn cancellation classification
 correction is committed and pushed at `31fd835`. One disposable first command attempt expired at Dashboard approval before
-external read, npm, candidate output or package effect; its disarmed broker listener left the process live.
-The local uncommitted correction drains that listener before Dashboard teardown. No approved external execution
-has occurred.
+external read, npm, candidate output or package effect; its disarmed broker listener left the process live. The committed
+correction drains that listener before Dashboard teardown. A separately approved disposable v2 run observed public
+metadata and a lock-only npm child, then naturally exited through the conservative quarantine path (exit 5), with no
+candidate or Dashboard-state output left behind. Its immutable audit evidence has six validated metadata requests and
+four further starts without validation; it has no replayed terminal outcome. The current local uncommitted network-free
+correction latches the first broker failure in a one-time authenticated private summary, never writes
+`genesis_incomplete` from the broker, and leaves the live owner to observe the process terminal and listener drain before
+using the existing product terminal transaction. No new external execution is authorized.
 Architecture-check baseline: `6108936` (`feat: add production graph genesis composition`).
 Production-owner implementation baseline: `7c15130` (`feat: add fail-closed graph genesis readiness`).
 

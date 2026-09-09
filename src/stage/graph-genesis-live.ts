@@ -49,6 +49,7 @@ import {
   HardenedMetadataBrokerAuthority,
   NodePinnedHttpsClient,
   SystemRegistryAddressResolver,
+  type AuthenticatedHardenedBrokerFailure,
   type AuthenticatedHardenedBrokerLedger,
 } from './graph-genesis-network.js';
 import { repositoryRoot, sqliteNativePath } from './graph-genesis-preflight-audit.js';
@@ -125,6 +126,10 @@ export async function runExactProductionGraphGenesisLive(
   let envelope: GraphGenesisExecutionEnvelopeV1 | undefined;
   let candidate: ExactGraphCandidate | undefined;
   let artifact: GraphGenesisCandidateArtifactV1 | undefined;
+  let broker: HardenedMetadataBrokerAuthority | undefined;
+  let brokerSession: object | undefined;
+  let brokerFailure: AuthenticatedHardenedBrokerFailure | undefined;
+  let rejectedBrokerFailure = false;
   let ledger: AuthenticatedHardenedBrokerLedger | undefined;
   let processResult: AuthenticatedGraphGenesisProcessResult | undefined;
   let postState: AuthenticatedHardenedGraphGenesisPostState | undefined;
@@ -177,7 +182,7 @@ export async function runExactProductionGraphGenesisLive(
     const workspaces = new FinalizedGraphGenesisWorkspaceAuthority(trees);
     const probes = new OwnedContainmentProbeAuthority(files, workspaces, new LocalSeatbeltContainmentProbeExecutor(controller.signal));
     const plans = new HardenedGraphGenesisPlanAuthority(files, trees, probes, versions, workspaces, hosts);
-    const broker = new HardenedMetadataBrokerAuthority(plans);
+    broker = new HardenedMetadataBrokerAuthority(plans);
     listener = new HardenedLoopbackBrokerListener(broker);
     const brokerPort = await listener.listen();
     throwIfAborted(controller.signal);
@@ -294,7 +299,7 @@ export async function runExactProductionGraphGenesisLive(
     const transport = new BoundedNpmPublicMetadataTransport(
       new SystemRegistryAddressResolver(), new NodePinnedHttpsClient(),
     );
-    const brokerSession = broker.prepareSession({
+    brokerSession = broker.prepareSession({
       plan, capsule: prepared.capsule, startLease: authorization.lease, startLeaseVerifier: sessions,
       audit: authorization.executionAudit, transport, onFailure: () => controller.abort(),
       mode: 'production', monotonicNow: () => performance.now(),
@@ -315,13 +320,17 @@ export async function runExactProductionGraphGenesisLive(
       signal: controller.signal, mode: 'production',
     });
     if (!supervisor.authenticates(processResult) || processResult.planHash !== plan.planHash) fail();
+    const claimedBrokerFailure = broker.claimFailure(brokerSession);
+    if (claimedBrokerFailure !== undefined
+      && (!broker.authenticatesFailure(claimedBrokerFailure) || claimedBrokerFailure.planHash !== plan.planHash)) fail();
+    brokerFailure = claimedBrokerFailure;
     phases.advance('LISTENER_DRAINING');
     const listenerDrain = await listener.closeAndDrain();
     listener = undefined;
-    throwIfAborted(controller.signal);
     await authorization.executionAudit.record('listener_drained', {
       acceptedHandlerCount: listenerDrain.acceptedHandlerCount,
     });
+    if (brokerFailure !== undefined) fail(brokerFailure.causeCode);
     throwIfAborted(controller.signal);
     if (processResult.status !== 'completed' || processResult.exitCode !== 0) fail('graph_metadata_incomplete');
     ledger = await broker.complete(brokerSession);
@@ -416,6 +425,15 @@ export async function runExactProductionGraphGenesisLive(
     });
   } catch (error) {
     phases.fail();
+    if (brokerFailure === undefined && broker !== undefined && brokerSession !== undefined) {
+      const claimedBrokerFailure = broker.claimFailure(brokerSession);
+      if (claimedBrokerFailure !== undefined && broker.authenticatesFailure(claimedBrokerFailure)
+        && (plan === undefined || claimedBrokerFailure.planHash === plan.planHash)) {
+        brokerFailure = claimedBrokerFailure;
+      } else if (claimedBrokerFailure !== undefined) {
+        rejectedBrokerFailure = true;
+      }
+    }
     const metadata = executionAudit?.metadataSummary();
     const externalRead = metadata !== undefined && metadata.externalReadStatus !== 'not_started';
     const quarantineReferenceDigest = root === undefined
@@ -435,8 +453,9 @@ export async function runExactProductionGraphGenesisLive(
     if ((!spawned || cleanup !== undefined) && root !== undefined) {
       try { await root.cleanup(); root = undefined; } catch { cleanupFailed = true; }
     }
-    let terminalUnknown = terminalCommitted || terminalCommitAttempted;
-    if (!terminalCommitAttempted && audit !== undefined
+    const auditPersistenceFailure = safeErrorCode(error) === 'stage_audit_incomplete';
+    let terminalUnknown = terminalCommitted || terminalCommitAttempted || auditPersistenceFailure || rejectedBrokerFailure;
+    if (!auditPersistenceFailure && !terminalCommitAttempted && audit !== undefined
       && executionAudit?.events.includes('npm_spawn_started') === true) {
       try {
         audit.finalizeGraphGenesisOutcome({
@@ -452,10 +471,10 @@ export async function runExactProductionGraphGenesisLive(
             ...(spawned && cleanup === undefined && quarantineReferenceDigest !== undefined
               ? { quarantineReferenceDigest } : {}),
           },
-          terminalAudit: { status: 'failed' }, errorCode: safeErrorCode(error),
+          terminalAudit: { status: 'failed' }, errorCode: brokerFailure?.causeCode ?? safeErrorCode(error),
         }, externalRead ? 'incomplete_external_read' : controller.signal.aborted ? 'cancelled' : 'execution_error');
       } catch { terminalUnknown = true; }
-    } else if (!terminalCommitAttempted && audit !== undefined) {
+    } else if (!auditPersistenceFailure && !terminalCommitAttempted && audit !== undefined) {
       try { audit.markFailed(safeErrorCode(error)); } catch { terminalUnknown = true; }
     }
     try { auditSource?.database.close(); } catch { terminalUnknown = true; }
@@ -484,8 +503,10 @@ export async function runExactProductionGraphGenesisLive(
       processSpawned: spawned, cleanupComplete: cleanup !== undefined, cleanupFailed,
       rootPreserved: !spawned && root !== undefined, terminalUnknown,
     });
+    const initiatingReason = brokerFailure?.causeCode ?? safeErrorCode(error);
     return safeResult(disposition.status, disposition.exitCode,
-      disposition.reasonCode === 'graph_live_failed' ? safeErrorCode(error) : disposition.reasonCode, executionAudit, {
+      disposition.reasonCode === 'graph_live_failed' || (brokerFailure !== undefined && disposition.status === 'incomplete')
+        ? initiatingReason : disposition.reasonCode, executionAudit, {
         audit, envelope, plan, candidate, artifact, processResult, cleanup, quarantineReferenceDigest,
       });
   } finally {

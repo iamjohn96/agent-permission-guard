@@ -260,6 +260,7 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     expect(JSON.parse(Buffer.from(body).toString('utf8'))).toMatchObject({ name: 'fixture' });
     const ledger = await fixture.broker.complete(session);
     expect(fixture.broker.authenticatesLedger(ledger)).toBe(true);
+    expect(fixture.broker.claimFailure(session)).toBeUndefined();
     expect(ledger).toMatchObject({ startedRequestCount: 1, uniquePackageCount: 1, aggregateResponseBytes: body.byteLength });
     expect(JSON.stringify(ledger)).not.toContain(fixture.plan.routeToken);
   });
@@ -304,6 +305,67 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     expect(aborted).toBe(true);
     expect(failures).toBe(1);
     await expect(fixture.broker.complete(session)).rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+  });
+
+  it('latches one private broker failure without closing the shared audit gate', async () => {
+    const fixture = await brokerFixture({ uniquePackageNames: 4, concurrentRequests: 4, responseBytes: 1024, aggregateResponseBytes: 4096 });
+    let onFailureCalls = 0;
+    let startedCount = 0;
+    let allStarted!: () => void;
+    const allStartedPromise = new Promise<void>((resolvePromise) => { allStarted = resolvePromise; });
+    const transport: HardenedPublicMetadataTransport = {
+      implementationKind: 'synthetic',
+      async fetchPackage(name, _limits, signal) {
+        startedCount += 1;
+        if (startedCount === 4) allStarted();
+        await allStartedPromise;
+        if (name === 'fixture') throw new Error('deterministic private transport failure');
+        if (!signal.aborted) {
+          await new Promise<void>((resolvePromise) => signal.addEventListener('abort', () => resolvePromise(), { once: true }));
+        }
+        throw new Error('in-flight request aborted');
+      },
+    };
+    const session = fixture.broker.prepareSession({
+      plan: fixture.plan.prepared.plan,
+      capsule: fixture.plan.prepared.capsule,
+      startLease: fixture.startLease,
+      startLeaseVerifier: fixture.leaseAuthority,
+      audit: fixture.audit,
+      transport,
+      onFailure: () => { onFailureCalls += 1; },
+      mode: 'synthetic',
+      monotonicNow: () => 1,
+    });
+    await fixture.broker.arm(session);
+    const outcomes = await Promise.allSettled(['fixture', 'second', 'third', 'fourth'].map((name) =>
+      fixture.broker.handle(session, 'GET', `/${fixture.plan.routeToken}/${name}`, {}),
+    ));
+
+    expect(outcomes.every((outcome) => outcome.status === 'rejected')).toBe(true);
+    expect(onFailureCalls).toBe(1);
+    await fixture.broker.abort(session);
+    await expect(fixture.broker.complete(session)).rejects.toMatchObject({ code: 'graph_metadata_invalid' });
+    const failure = fixture.broker.claimFailure(session);
+    expect(failure).toMatchObject({
+      causeCode: 'graph_metadata_invalid', reservedRequestCount: 4, activeRequestCount: 4,
+      committedResponseCount: 0, committedResponseBytes: 0,
+    });
+    expect(failure?.reservedRequestCount).toBeLessThanOrEqual(fixture.plan.prepared.plan.limits.broker.totalRequests);
+    expect(failure?.activeRequestCount).toBeLessThanOrEqual(failure?.reservedRequestCount ?? 0);
+    expect(failure?.committedResponseCount).toBeLessThanOrEqual(failure?.reservedRequestCount ?? 0);
+    expect(failure?.committedResponseBytes).toBeLessThanOrEqual(fixture.plan.prepared.plan.limits.broker.aggregateResponseBytes);
+    expect(fixture.broker.authenticatesFailure(failure)).toBe(true);
+    expect(fixture.broker.authenticatesFailure({ ...failure! })).toBe(false);
+    expect(fixture.broker.claimFailure(session)).toBeUndefined();
+    expect(() => fixture.broker.claimFailure({})).toThrowError(expect.objectContaining({ code: 'graph_metadata_invalid' }));
+    expect(fixture.audit.events).not.toContain('genesis_incomplete');
+    expect(fixture.sink.events.map((event) => event.name)).not.toContain('genesis_incomplete');
+    await fixture.audit.record('npm_terminal_observed', { status: 'cancelled', exitCode: -1, stdoutBytes: 0, stderrBytes: 0 });
+    await fixture.audit.record('listener_drained', { acceptedHandlerCount: 4 });
+    expect(fixture.audit.events.slice(-2)).toEqual(['npm_terminal_observed', 'listener_drained']);
+    expect(JSON.stringify(failure)).not.toContain(fixture.plan.routeToken);
+    expect(JSON.stringify(failure)).not.toContain('deterministic private transport failure');
   });
 
   it('keeps a loopback listener disarmed until authorization and forwards only the exact route', async () => {
