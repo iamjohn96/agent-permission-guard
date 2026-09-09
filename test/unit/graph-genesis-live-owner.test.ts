@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openAuditDatabase, type AuditDatabase } from '../../src/db/database.js';
 import {
   GRAPH_GENESIS_LIVE_PHASES,
+  classifyGraphGenesisFailure,
   GraphGenesisLivePhaseAuthority,
   SyntheticGraphGenesisFullFlowTwin,
   type GraphGenesisLivePhase,
@@ -61,6 +62,31 @@ describe('Exact Production Graph Genesis owner boundary', () => {
       .rejects.toThrow(/acceptance_incomplete/);
     expect(observed.at(-1)).toBe('BROKER_ARMED');
     expect(observed).not.toContain('NPM_RUNNING');
+  });
+
+  it('classifies approved pre-spawn cancellation as not started without external or package effects', () => {
+    expect(classifyGraphGenesisFailure({
+      cancelled: true, externalReadMayHaveOccurred: false, processSpawned: false,
+      cleanupComplete: true, cleanupFailed: false, rootPreserved: false, terminalUnknown: false,
+    })).toEqual({
+      status: 'not_started', exitCode: 2, reasonCode: 'pre_dispatch_cancelled',
+      externalReadMayHaveOccurred: false, installationOccurred: false, packageDownloadOccurred: false,
+    });
+  });
+
+  it('does not downgrade external/process effects, quarantine, or terminal ambiguity to not started', () => {
+    const base = {
+      cancelled: true, externalReadMayHaveOccurred: false, processSpawned: false,
+      cleanupComplete: true, cleanupFailed: false, rootPreserved: false, terminalUnknown: false,
+    };
+    expect(classifyGraphGenesisFailure({ ...base, externalReadMayHaveOccurred: true }))
+      .toMatchObject({ status: 'incomplete', exitCode: 4 });
+    expect(classifyGraphGenesisFailure({ ...base, processSpawned: true }))
+      .toMatchObject({ status: 'failed', exitCode: 3 });
+    expect(classifyGraphGenesisFailure({ ...base, cleanupFailed: true }))
+      .toMatchObject({ status: 'quarantined', exitCode: 5 });
+    expect(classifyGraphGenesisFailure({ ...base, terminalUnknown: true }))
+      .toMatchObject({ status: 'outcome_unknown', exitCode: 6 });
   });
 
   it('keeps the synthetic twin free of production network and spawn capabilities', () => {

@@ -42,7 +42,7 @@ import {
   computeWorkspaceBinding,
   type HardenedGraphGenesisPlan,
 } from './graph-genesis-hardening.js';
-import { GraphGenesisLivePhaseAuthority } from './graph-genesis-live-state.js';
+import { classifyGraphGenesisFailure, GraphGenesisLivePhaseAuthority } from './graph-genesis-live-state.js';
 import {
   BoundedNpmPublicMetadataTransport,
   HardenedLoopbackBrokerListener,
@@ -477,26 +477,13 @@ export async function runExactProductionGraphGenesisLive(
       } catch { /* keep the conservative unknown result */ }
       terminalUnknown = true;
     }
-    if (cleanupFailed || (!spawned && root !== undefined)) {
-      return safeResult('quarantined', 5, 'cleanup_quarantined', executionAudit, {
-        audit, envelope, plan, candidate, artifact, processResult, cleanup,
-        quarantineReferenceDigest,
-      });
-    }
-    if (spawned && cleanup === undefined) {
-      return safeResult('quarantined', 5, 'cleanup_quarantined', executionAudit, {
-        audit, envelope, plan, candidate, artifact, processResult,
-        quarantineReferenceDigest,
-      });
-    }
-    if (terminalUnknown) {
-      return safeResult('outcome_unknown', 6, 'outcome_unknown_after_interruption', executionAudit, {
-        audit, envelope, plan, candidate, artifact, processResult, cleanup,
-        quarantineReferenceDigest,
-      });
-    }
-    return safeResult(externalRead ? 'incomplete' : 'failed', externalRead ? 4 : 3,
-      safeErrorCode(error), executionAudit, {
+    const disposition = classifyGraphGenesisFailure({
+      cancelled: controller.signal.aborted, externalReadMayHaveOccurred: externalRead,
+      processSpawned: spawned, cleanupComplete: cleanup !== undefined, cleanupFailed,
+      rootPreserved: !spawned && root !== undefined, terminalUnknown,
+    });
+    return safeResult(disposition.status, disposition.exitCode,
+      disposition.reasonCode === 'graph_live_failed' ? safeErrorCode(error) : disposition.reasonCode, executionAudit, {
         audit, envelope, plan, candidate, artifact, processResult, cleanup, quarantineReferenceDigest,
       });
   } finally {

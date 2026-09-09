@@ -4,7 +4,7 @@
 
 The Exact Production Graph Genesis Live Run Readiness Architecture Check was accepted on 2026-09-09. Its first
 network-free readiness foundation is committed and pushed at `7c15130`. The approved non-injectable production
-owner and synthetic full-flow are implemented locally and uncommitted: the exact CLI now hands off to one
+owner and synthetic full-flow are committed and pushed at `592b286`: the exact CLI now hands off to one
 owner of runtime capture, containment, approval, audit, broker, process, output, cleanup and terminal
 reconciliation. The compiled production probe no longer depends on a test fixture. Default tests do not invoke
 the live owner; the full network-free regression is `290 passed, 3 skipped`. No product DB, operator output,
@@ -222,8 +222,9 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## In Progress
 
-- Exact Production Graph Genesis production owner and synthetic full-flow are implemented locally from clean
-  baseline `7c15130`; commit and push require a separate approval.
+- A pre-spawn cancellation classification correction is implemented locally and uncommitted: an approved
+  action cancelled before spawn and before any external read returns `not_started`/exit 2, while quarantine,
+  terminal ambiguity, spawn and external-read outcomes retain their conservative classifications.
 - The public CLI is connected locally, but the production function has never been invoked. One exact live
   acceptance remains a separate approval for named paths plus a personal Dashboard `Approve once` decision.
 - The execution envelope directly binds the owner-captured comprehensive runtime-manifest digest as well as
@@ -472,14 +473,12 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 - Native clients must invalidate in-flight work on state rotation; server-side instance matching cannot cancel stale client responses by itself.
 - The supervisor and broker now reject missing, copied, expired, replayed or phase-reused start leases, and
   the listener reports zero-outstanding handler/socket drain. These foundations have only synthetic execution
-  evidence; the real run remains blocked by the intentionally absent production CLI composition.
+  evidence; the real run remains separately approval-gated and has not been invoked.
 - Candidate receipts and audit chains remain portable unsigned local evidence. A local DB owner can recompute
   history, same-user races remain possible, and public metadata disclosure cannot be rolled back.
 
 ## Next Recommended Task
 
-Review and, if accepted, commit and push the fail-closed Live Run Readiness foundation. The next implementation
-task is the non-injectable production owner plus a synthetic full-flow twin that joins fresh capture,
-Dashboard/audit session, approval, broker/listener/transport/supervisor, post-state/compiler/output/cleanup,
-one terminal commit and read-only reconciliation. Keep that work network-free; the one-time real acceptance
-remains a later exact command plus the user's live Dashboard decision.
+Review the uncommitted pre-spawn cancellation correction, then seek separate commit/push approval. The
+non-injectable production owner and synthetic full-flow are committed at `592b286`; the one-time real
+acceptance remains a later exact command plus the user's live Dashboard decision.

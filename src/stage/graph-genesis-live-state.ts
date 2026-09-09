@@ -23,6 +23,57 @@ export const GRAPH_GENESIS_LIVE_PHASES = Object.freeze([
 
 export type GraphGenesisLivePhase = typeof GRAPH_GENESIS_LIVE_PHASES[number];
 
+/**
+ * Pure terminal classification shared by the live owner and network-free tests.
+ * Quarantine and uncertain terminal durability always take precedence over a cancellation.
+ */
+export function classifyGraphGenesisFailure(input: Readonly<{
+  cancelled: boolean;
+  externalReadMayHaveOccurred: boolean;
+  processSpawned: boolean;
+  cleanupComplete: boolean;
+  cleanupFailed: boolean;
+  rootPreserved: boolean;
+  terminalUnknown: boolean;
+}>): Readonly<{
+  status: 'not_started' | 'failed' | 'incomplete' | 'quarantined' | 'outcome_unknown';
+  exitCode: 2 | 3 | 4 | 5 | 6;
+  reasonCode: string;
+  externalReadMayHaveOccurred: boolean;
+  installationOccurred: false;
+  packageDownloadOccurred: false;
+}> {
+  if (input.cleanupFailed || (!input.processSpawned && input.rootPreserved)
+    || (input.processSpawned && !input.cleanupComplete)) {
+    return Object.freeze({
+      status: 'quarantined' as const, exitCode: 5 as const, reasonCode: 'cleanup_quarantined',
+      externalReadMayHaveOccurred: input.externalReadMayHaveOccurred,
+      installationOccurred: false as const, packageDownloadOccurred: false as const,
+    });
+  }
+  if (input.terminalUnknown) {
+    return Object.freeze({
+      status: 'outcome_unknown' as const, exitCode: 6 as const, reasonCode: 'outcome_unknown_after_interruption',
+      externalReadMayHaveOccurred: input.externalReadMayHaveOccurred,
+      installationOccurred: false as const, packageDownloadOccurred: false as const,
+    });
+  }
+  if (input.cancelled && !input.processSpawned && !input.externalReadMayHaveOccurred) {
+    return Object.freeze({
+      status: 'not_started' as const, exitCode: 2 as const, reasonCode: 'pre_dispatch_cancelled',
+      externalReadMayHaveOccurred: false as const,
+      installationOccurred: false as const, packageDownloadOccurred: false as const,
+    });
+  }
+  return Object.freeze({
+    status: input.externalReadMayHaveOccurred ? 'incomplete' as const : 'failed' as const,
+    exitCode: input.externalReadMayHaveOccurred ? 4 as const : 3 as const,
+    reasonCode: input.externalReadMayHaveOccurred ? 'incomplete_external_read' : 'graph_live_failed',
+    externalReadMayHaveOccurred: input.externalReadMayHaveOccurred,
+    installationOccurred: false as const, packageDownloadOccurred: false as const,
+  });
+}
+
 export class GraphGenesisLivePhaseAuthority {
   #index = -1;
   #terminal = false;

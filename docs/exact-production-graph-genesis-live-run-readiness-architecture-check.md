@@ -1,7 +1,8 @@
 # Exact Production Graph Genesis Live Run Readiness Architecture Check
 
 Status: accepted on 2026-09-09; initial readiness foundation committed at `7c15130`; production owner and
-synthetic full-flow implementation complete locally and uncommitted. No production live run has occurred.
+synthetic full-flow implementation committed and pushed at `592b286`. A pre-spawn cancellation classification
+correction is local and uncommitted. No production live run has occurred.
 Architecture-check baseline: `6108936` (`feat: add production graph genesis composition`).
 Production-owner implementation baseline: `7c15130` (`feat: add fail-closed graph genesis readiness`).
 
