@@ -464,3 +464,35 @@ disposable persistence tests are connected; the real CLI action remains unavaila
 
 Revisit If: A supported sandbox, authenticated team approval, signed/anchored receipt, hosted audit authority,
 different graph generator, target/runtime profile, or transactionally coupled artifact store is introduced.
+
+## Live Graph Genesis stays publicly fail-closed until one owner authenticates every terminal consequence
+
+Date: 2026-09-09
+
+Context: The production adapters and execution-envelope session exist, but exposing a partly joined live
+command could allow persistent output or external-read success to outpace Dashboard scope, audit durability,
+terminal acknowledgement, or cleanup proof.
+
+Decision: Publish only the exact closed command grammar at the first readiness checkpoint and return a stable
+nonzero `live_execution_not_enabled` result after effect-free local path/environment checks. Independently
+close the shared prerequisites: WAL/FULL/integrity/sidecar identity, immediate bounded Graph audit writes,
+one detailed atomic terminal API, action/envelope-scoped Dashboard access, exclusive state creation, final
+candidate readback plus parent fsync, and read-only DB-backed terminal proof. Do not connect DNS, HTTPS, npm,
+the product DB, a real output, or the low-level production adapters until a single non-injectable owner and
+its network-free full-flow twin authenticate every phase.
+
+Alternatives: Hide the parser until the entire owner exists; expose the existing low-level adapters through
+CLI options; treat a self-digested candidate or in-memory completion as sufficient; let Graph use the generic
+Dashboard audit list or generic execution terminal method.
+
+Reason: A visible but safely disabled surface gives exact parser and UX regression coverage without creating
+a partial execution authority. Closing persistence and evidence primitives first reduces the amount of
+state the later live owner must coordinate and makes every incomplete outcome explicit.
+
+Trade-offs: The command is intentionally unusable for the real action in this checkpoint. The owner join,
+synthetic end-to-end race coverage and one separately approved live acceptance remain required. Local WAL and
+portable unsigned receipts still do not defend against a privileged DB owner, power loss, or hostile same-user
+tampering.
+
+Revisit If: The production owner and synthetic twin pass the accepted readiness criteria, SQLite durability
+requirements change, a signed/anchored receipt is introduced, or Graph Genesis moves to a supported sandbox.

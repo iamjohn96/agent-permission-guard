@@ -1,4 +1,4 @@
-import { chmodSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 
@@ -60,6 +60,7 @@ export type ExistingGraphGenesisAuditDatabase = Readonly<{
   fileIdentityDigest: string;
   databaseInstanceId: string;
   initialChainTail: string;
+  durabilityProfileDigest: string;
 }>;
 
 const existingGraphGenesisAuditDatabases = new WeakSet<object>();
@@ -87,6 +88,7 @@ export function revalidatesExistingGraphGenesisAuditDatabase(
       device: file.dev, inode: file.ino, owner: file.uid, mode: file.mode & 0o7777,
     }));
     if (fileIdentityDigest !== source.fileIdentityDigest) return false;
+    if (captureDurabilityProfile(source.database, source.canonicalPath).digest !== source.durabilityProfileDigest) return false;
     const migrations = source.database.prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all() as Array<{ version: number }>;
     if (canonicalJson(migrations.map((row) => row.version)) !== '[1,2]') return false;
@@ -131,6 +133,8 @@ export function openExistingGraphGenesisAuditDatabase(path: string): ExistingGra
   try {
     database.pragma('foreign_keys = ON');
     database.pragma('busy_timeout = 5000');
+    database.pragma('synchronous = FULL');
+    const durability = captureDurabilityProfile(database, canonicalPath);
     const migrations = database.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>;
     if (canonicalJson(migrations.map((row) => row.version)) !== '[1,2]') throw new Error('Unsupported audit database schema');
     const requiredTables = ['approvals', 'audit_events', 'schema_migrations', 'tool_calls'];
@@ -163,6 +167,7 @@ export function openExistingGraphGenesisAuditDatabase(path: string): ExistingGra
       fileIdentityDigest,
       databaseInstanceId: randomUUID(),
       initialChainTail: tail,
+      durabilityProfileDigest: durability.digest,
     });
     existingGraphGenesisAuditDatabases.add(opened);
     return opened;
@@ -170,6 +175,38 @@ export function openExistingGraphGenesisAuditDatabase(path: string): ExistingGra
     database.close();
     throw error;
   }
+}
+
+function captureDurabilityProfile(database: AuditDatabase, canonicalPath: string): Readonly<{
+  journalMode: 'wal';
+  synchronous: 2;
+  busyTimeoutMs: 5000;
+  integrity: 'ok';
+  sidecars: readonly string[];
+  digest: string;
+}> {
+  const journalMode = String(database.pragma('journal_mode', { simple: true })).toLowerCase();
+  const synchronous = Number(database.pragma('synchronous', { simple: true }));
+  const busyTimeoutMs = Number(database.pragma('busy_timeout', { simple: true }));
+  const integrity = String(database.pragma('integrity_check', { simple: true })).toLowerCase();
+  if (journalMode !== 'wal' || synchronous !== 2 || busyTimeoutMs !== 5000 || integrity !== 'ok') {
+    throw new Error('Graph Genesis audit DB durability profile is unsupported');
+  }
+  const sidecars = [`${canonicalPath}-wal`, `${canonicalPath}-shm`].filter((path) => existsSync(path));
+  const currentUser = typeof process.geteuid === 'function' ? process.geteuid() : lstatSync(canonicalPath).uid;
+  for (const sidecar of sidecars) {
+    const info = lstatSync(sidecar);
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.uid !== currentUser
+      || (info.mode & 0o077) !== 0) throw new Error('Graph Genesis audit DB sidecar is not private');
+  }
+  const profile = Object.freeze({
+    journalMode: 'wal' as const,
+    synchronous: 2 as const,
+    busyTimeoutMs: 5000 as const,
+    integrity: 'ok' as const,
+    sidecars: Object.freeze(sidecars.map((path) => path.slice(canonicalPath.length))),
+  });
+  return Object.freeze({ ...profile, digest: sha256(canonicalJson(profile)) });
 }
 
 function sha256(value: string): string { return createHash('sha256').update(value).digest('hex'); }

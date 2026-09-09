@@ -68,6 +68,22 @@ export class AuditQueryService {
       hashChainValid: this.recorder.verifyHashChain(),
     };
   }
+
+  getAction(actionId: string): Readonly<{ calls: readonly AuditCallView[]; hashChainValid: boolean }> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(actionId)) {
+      throw new Error('Audit action ID must be a UUID');
+    }
+    const row = this.database.prepare(`
+      SELECT tc.*, approvals.status AS approval_status
+      FROM tool_calls AS tc
+      LEFT JOIN approvals ON approvals.tool_call_id = tc.id
+      WHERE tc.id = ?
+    `).get(actionId) as AuditRow | undefined;
+    return {
+      calls: row === undefined ? [] : [toView(row)],
+      hashChainValid: this.recorder.verifyHashChain(),
+    };
+  }
 }
 
 function toView(row: AuditRow): AuditCallView {

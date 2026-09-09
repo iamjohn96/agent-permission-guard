@@ -353,3 +353,30 @@ safety result, or execution capability. Automated coverage uses only disposable 
 metadata transport and an in-memory inert child. The production CLI, real npm adapter, public transport,
 product DB and real candidate path remain deliberately disconnected. See
 `docs/production-graph-genesis-approval-execution-composition-architecture-check.md`.
+
+## Production Graph Genesis Live-Run Readiness Foundation
+
+The accepted live-run design adds one non-injectable owner from strict `apg graph genesis filesystem` parsing
+through fresh runtime/host/containment capture, exact DB/output/Dashboard envelope, one-time local approval,
+broker and supervised npm execution, post-state compilation, durable candidate output, authenticated cleanup,
+atomic terminal receipt and read-only reconciliation. Command invocation authorizes local preparation only;
+the exact Dashboard `Approve once` decision separately gates broker arm and npm spawn.
+
+The live Dashboard is action-scoped and cannot enumerate unrelated audit history or edit policy. The existing
+DB is never discovered, created or migrated; its file/schema/chain/durability identity is bound to the
+envelope. Candidate success requires final-file readback, file and parent durability, exact cleanup, one
+terminal transaction, and DB-backed proof. An orphan artifact, copied receipt or in-memory success cannot be
+promoted.
+
+Implementation tests remain network-free and cannot invoke the production entry point. Public registry
+metadata access plus the fixed local npm lock-only process require a later exact command approval and live
+Dashboard decision. Tarball download, installation, lifecycle/package code, profile registration,
+materialization, startup and MCP actions remain separate boundaries. See
+`docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md`.
+
+The first local implementation tranche exposes the exact parser but keeps the command intentionally
+fail-closed after read-only path/environment readiness checks. It also adds WAL/FULL/integrity/sidecar
+durability binding, immediate Graph audit transactions, bounded typed evidence, a closed detailed terminal
+API, action/envelope-scoped Graph Dashboard mode, exclusive state handoff, candidate readback plus parent
+fsync, and DB-backed read-only terminal proof. The concrete production owner is not yet connected, so no
+public metadata read or npm process can be started through this route.

@@ -20,6 +20,12 @@ import { parseInitArguments, runInit } from './init.js';
 import { parseInspectArguments, runInspect } from './inspect.js';
 import { parseInstallArguments, runInstall } from './install.js';
 import { parseReceiptArguments, runReceipt } from './receipt.js';
+import {
+  graphGenesisUsage,
+  isGraphGenesisUsageError,
+  parseGraphGenesisArguments,
+  runGraphGenesisReadiness,
+} from './graph-genesis.js';
 
 export type ProxyArguments = Readonly<{
   policyPath: string;
@@ -100,6 +106,24 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   if (argv[0] === 'receipt') {
     const result = runReceipt(parseReceiptArguments(argv.slice(1)));
     if (!result.successful) process.exitCode = 1;
+    return;
+  }
+  if (argv[0] === 'graph') {
+    let parsed;
+    try { parsed = parseGraphGenesisArguments(argv); } catch (error) {
+      if (!isGraphGenesisUsageError(error)) throw error;
+      process.stderr.write(`${error.message}\n`);
+      process.exitCode = error.exitCode;
+      return;
+    }
+    if (parsed.kind === 'help') {
+      process.stdout.write(`${graphGenesisUsage()}\n`);
+      return;
+    }
+    const result = await runGraphGenesisReadiness(parsed);
+    process.stderr.write('[apg] Graph Genesis live execution remains fail-closed at this readiness checkpoint.\n');
+    process.stderr.write(`[apg] protection boundary: ${result.bypassWarning}\n`);
+    process.exitCode = result.exitCode;
     return;
   }
   if (argv[0] === '--help' || argv[0] === '-h' || argv.length === 0) {
@@ -218,6 +242,7 @@ function generalUsage(): string {
     '  apg install <npm|npx> <package-spec> [supported package options] [--registry <https-url>] [--timeout-seconds <1..900>] [--approval-ttl-seconds <1..3600>] [--policy <policy.yaml>] [--audit-db <audit.sqlite>] [--dashboard-port <port>]',
     '  apg receipt export <action-id> [--audit-db <audit.sqlite>] --output <receipt.json>',
     '  apg receipt verify <receipt.json>',
+    '  apg graph genesis filesystem --audit-db <existing-private-apg-audit.sqlite> --output <absent-candidate.json> [--dashboard-port <0-or-port>] [--dashboard-state <absent-private-dashboard.json>]',
     '  apg proxy --policy <policy.yaml> --audit-db <audit.sqlite> [--dashboard-port <port>] [--dashboard-state <dashboard.json>] [--identity-profile <profile-id>] -- <upstream-command> [args...]',
   ].join('\n');
 }

@@ -33,9 +33,45 @@ export interface AuditCall {
   markBlocked(status: 'denied' | 'approval_unavailable' | 'approval_denied' | 'approval_expired' | 'approval_cancelled'): void;
   markCompleted(result: CallToolResult): void;
   markExecutionResult(summary: unknown, isError: boolean): void;
+  finalizeGraphGenesisOutcome(summary: GraphGenesisExecutionSummary, terminalStatus: GraphGenesisTerminalStatus): void;
   markFailed(code: string): void;
   appendEvidence(eventType: string, details: unknown): void;
 }
+
+export type GraphGenesisTerminalStatus =
+  | 'completed'
+  | 'execution_error'
+  | 'cancelled'
+  | 'failed'
+  | 'audit_failed'
+  | 'incomplete_external_read'
+  | 'outcome_unknown_after_interruption';
+
+export type GraphGenesisExecutionSummary = Readonly<{
+  metadata: Readonly<{
+    externalReadStatus: 'not_started' | 'started' | 'validated' | 'incomplete';
+    requestCount: number;
+    uniquePackageCount: number;
+    responseBytes: number;
+  }>;
+  process: Readonly<{
+    status: 'completed' | 'failed' | 'timed_out' | 'cancelled' | 'output_overflow';
+    exitCode: number | null;
+    stdoutBytes: number;
+    stderrBytes: number;
+  }>;
+  candidate?: Readonly<{
+    lockDigest: string;
+    candidateDigest: string;
+    artifactDigest: string;
+  }>;
+  cleanup: Readonly<{
+    status: 'not_needed' | 'complete' | 'quarantined' | 'incomplete';
+    quarantineReferenceDigest?: string;
+  }>;
+  terminalAudit: Readonly<{ status: 'complete' | 'failed' | 'unknown' }>;
+  errorCode?: string;
+}>;
 
 export interface AuditRecorder {
   begin(context: ToolCallContext, decision: AuditDecision): AuditCall;
@@ -70,6 +106,7 @@ export class NoopAuditRecorder implements AuditRecorder {
       markBlocked() {},
       markCompleted() {},
       markExecutionResult() {},
+      finalizeGraphGenesisOutcome() {},
       markFailed() {},
       appendEvidence() {},
     };
@@ -80,7 +117,15 @@ export class SqliteAuditRecorder implements AuditRecorder {
   constructor(
     private readonly database: AuditDatabase,
     private readonly now: () => Date = () => new Date(),
+    private readonly transactionMode: 'deferred' | 'immediate' = 'deferred',
   ) {}
+
+  private transaction<T>(operation: () => T): () => T {
+    const transaction = this.database.transaction(operation);
+    return this.transactionMode === 'immediate'
+      ? () => transaction.immediate()
+      : () => transaction();
+  }
 
   begin(context: ToolCallContext, decision: AuditDecision): AuditCall {
     const id = randomUUID();
@@ -88,7 +133,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
     const evaluation = normalizeEvaluation(decision);
     const receiptContext = trustedReceiptContext(context, decision.receipt);
     const redactedArguments = redactForAudit(context.arguments);
-    const insert = this.database.transaction(() => {
+    const insert = this.transaction(() => {
       this.database.prepare(`
         INSERT INTO tool_calls (
           id, server_id, tool_name, arguments_json, request_hash,
@@ -177,7 +222,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
         if (approval.required && approval.outcome !== 'approved') throw new Error('Required approval is not approved');
         const timestamp = this.now().toISOString();
         const nextAuthorization = buildAuthorization('authorized', 'approval_approved', timestamp);
-        this.database.transaction(() => {
+        this.transaction(() => {
           this.updateStatus(id, 'authorized');
           this.appendEvent(id, 'authorization_receipt_finalized', {
             receipt: nextAuthorization.receipt,
@@ -197,7 +242,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
           throw new Error('Graph Genesis is not ready for execution start');
         }
         const timestamp = this.now().toISOString();
-        this.database.transaction(() => {
+        this.transaction(() => {
           this.updateStatus(id, 'forwarding');
           this.appendEvent(id, 'execution_start_recorded', {
             receiptDigest: authorization!.digest,
@@ -221,7 +266,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
           approval.outcome === 'approved' ? 'approval_approved' : 'policy_allowed',
           timestamp,
         );
-        this.database.transaction(() => {
+        this.transaction(() => {
           this.updateStatus(id, 'forwarding');
           this.appendEvent(id, 'authorization_receipt_finalized', {
             receipt: nextAuthorization.receipt,
@@ -237,7 +282,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
       },
       markApprovalRequested: (request) => {
         if (terminal) throw new Error('Audit call is already terminal');
-        this.database.transaction(() => {
+        this.transaction(() => {
           this.database.prepare(`
             INSERT INTO approvals (
               id, tool_call_id, status, requested_at, expires_at
@@ -261,7 +306,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
       markApprovalResolved: (approvalId, outcome) => {
         if (terminal) throw new Error('Audit call is already terminal');
         const decidedAt = this.now().toISOString();
-        this.database.transaction(() => {
+        this.transaction(() => {
           const result = this.database.prepare(`
             UPDATE approvals
             SET status = ?, decided_at = ?
@@ -286,7 +331,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
         approval = blockedApproval(approval, status);
         const completedAt = this.now();
         const nextAuthorization = buildAuthorization('blocked', status, completedAt.toISOString());
-        this.database.transaction(() => {
+        this.transaction(() => {
           this.finish(id, status, startedAt, completedAt, undefined, undefined);
           this.appendEvent(id, status, {});
           this.appendEvent(id, 'authorization_receipt_finalized', {
@@ -313,7 +358,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
           completedAt: completedAt.toISOString(),
           observedResult: summarizeMcpReceiptResult(result),
         });
-        this.database.transaction(() => {
+        this.transaction(() => {
           this.finish(
             id,
             result.isError === true ? 'upstream_error' : 'completed',
@@ -335,6 +380,9 @@ export class SqliteAuditRecorder implements AuditRecorder {
         if (!dispatched || authorization === undefined || executionStartedAt === undefined) {
           throw new Error('Execution was not durably authorized');
         }
+        if (receiptContext.boundary === 'graph_genesis_plan') {
+          throw new Error('Graph Genesis requires the closed terminal API');
+        }
         const redactedSummary = redactForAudit(summary);
         const completedAt = this.now();
         const outcome = createOutcomeReceipt({
@@ -346,7 +394,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
           completedAt: completedAt.toISOString(),
           observedResult: summarizeExecutionReceiptResult(receiptContext, summary, isError),
         });
-        this.database.transaction(() => {
+        this.transaction(() => {
           this.finish(id, isError ? 'execution_error' : 'completed', startedAt, completedAt, redactedSummary, undefined);
           if (receiptContext.boundary === 'graph_genesis_plan') {
             this.appendEvent(id, isError ? 'graph_genesis_incomplete' : 'graph_genesis_complete', {
@@ -354,6 +402,43 @@ export class SqliteAuditRecorder implements AuditRecorder {
               outcomeReceiptDigest: receiptDigest(outcome),
             });
           }
+          this.appendEvent(id, 'execution_completed', redactedSummary);
+          this.appendEvent(id, 'outcome_receipt_finalized', {
+            receipt: outcome,
+            receiptDigest: receiptDigest(outcome),
+          });
+        })();
+        terminal = true;
+      },
+      finalizeGraphGenesisOutcome: (summary, terminalStatus) => {
+        if (terminal) throw new Error('Audit call is already terminal');
+        if (receiptContext.boundary !== 'graph_genesis_plan') {
+          throw new Error('Graph Genesis terminal API requires the Graph Genesis boundary');
+        }
+        if (!dispatched || authorization === undefined || executionStartedAt === undefined) {
+          throw new Error('Execution was not durably authorized');
+        }
+        assertGraphGenesisExecutionSummary(summary, terminalStatus);
+        const completedAt = this.now();
+        const redactedSummary = redactForAudit(summary);
+        const isError = terminalStatus !== 'completed';
+        const observedResult = summarizeExecutionReceiptResult(receiptContext, summary, isError);
+        const outcome = createOutcomeReceipt({
+          issuedAt: completedAt.toISOString(),
+          authorization: authorization.receipt,
+          authorizationReceiptDigest: authorization.digest,
+          startedAt: executionStartedAt,
+          terminalStatus,
+          completedAt: completedAt.toISOString(),
+          observedResult,
+        });
+        this.transaction(() => {
+          this.finish(id, terminalStatus, startedAt, completedAt, redactedSummary, summary.errorCode);
+          this.appendEvent(id, terminalStatus === 'completed' ? 'graph_genesis_complete' : 'graph_genesis_incomplete', {
+            executionPlanHash: receiptContext.executionPlanHash,
+            terminalStatus,
+            outcomeReceiptDigest: receiptDigest(outcome),
+          });
           this.appendEvent(id, 'execution_completed', redactedSummary);
           this.appendEvent(id, 'outcome_receipt_finalized', {
             receipt: outcome,
@@ -384,7 +469,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
             observedResult: { kind: receiptResultKind(receiptContext), isError: true, errorCode: safeReasonCode(code) },
           })
           : undefined;
-        this.database.transaction(() => {
+        this.transaction(() => {
           this.finish(id, 'failed', startedAt, completedAt, undefined, code);
           if (receiptContext.boundary === 'graph_genesis_plan') {
             this.appendEvent(id, 'graph_genesis_incomplete', {
@@ -418,7 +503,7 @@ export class SqliteAuditRecorder implements AuditRecorder {
         if (Buffer.byteLength(canonicalJson(safeDetails), 'utf8') > 65_536) {
           throw new Error('Graph Genesis evidence event exceeds the size limit');
         }
-        this.database.transaction(() => this.appendEvent(id, eventType, safeDetails))();
+        this.transaction(() => this.appendEvent(id, eventType, safeDetails))();
       },
     };
   }
@@ -685,8 +770,42 @@ function boundedNonNegativeInteger(value: unknown, maximum: number): number | un
     : undefined;
 }
 
-function isExecutionStatus(value: unknown): value is 'completed' | 'failed' | 'timed_out' | 'cancelled' {
-  return value === 'completed' || value === 'failed' || value === 'timed_out' || value === 'cancelled';
+function isExecutionStatus(value: unknown): value is 'completed' | 'failed' | 'timed_out' | 'cancelled' | 'output_overflow' {
+  return value === 'completed' || value === 'failed' || value === 'timed_out'
+    || value === 'cancelled' || value === 'output_overflow';
+}
+
+function assertGraphGenesisExecutionSummary(
+  summary: GraphGenesisExecutionSummary,
+  terminalStatus: GraphGenesisTerminalStatus,
+): void {
+  const observed = summarizeExecutionReceiptResult({ boundary: 'graph_genesis_plan' } as ReceiptContext, summary, terminalStatus !== 'completed');
+  if (observed.kind !== 'graph_genesis'
+    || observed.externalReadStatus === undefined
+    || observed.executionStatus === undefined
+    || observed.cleanupStatus === undefined
+    || observed.terminalAuditStatus === undefined
+    || observed.metadataRequestCount === undefined
+    || observed.metadataUniquePackageCount === undefined
+    || observed.metadataResponseBytes === undefined
+    || observed.stdoutBytes === undefined
+    || observed.stderrBytes === undefined) {
+    throw new Error('Graph Genesis terminal summary is incomplete or out of bounds');
+  }
+  if (terminalStatus === 'completed' && (
+    observed.externalReadStatus !== 'validated'
+    || observed.executionStatus !== 'completed'
+    || observed.exitCode !== 0
+    || observed.lockDigest === undefined
+    || observed.candidateDigest === undefined
+    || observed.candidateArtifactDigest === undefined
+    || observed.cleanupStatus !== 'complete'
+    || observed.terminalAuditStatus !== 'complete'
+  )) throw new Error('Graph Genesis success summary is not complete');
+  if (terminalStatus === 'incomplete_external_read'
+    && observed.externalReadStatus !== 'started' && observed.externalReadStatus !== 'incomplete') {
+    throw new Error('Incomplete external read status lacks external-read evidence');
+  }
 }
 
 function isVerificationStatus(value: unknown): value is 'verified' | 'failed' | 'limited' {

@@ -80,6 +80,7 @@ export type GraphGenesisExecutionEnvelopeV1 = Readonly<{
   auditFileIdentityDigest: string;
   auditDatabaseInstanceId: string;
   initialAuditChainTail: string;
+  auditDurabilityProfileDigest: string;
   outputCanonicalPathDigest: string;
   outputParentIdentityDigest: string;
   outputRule: 'exclusive_new_private_file';
@@ -117,6 +118,7 @@ export class GraphGenesisExecutionEnvelopeAuthority {
       fileIdentityDigest: string;
       databaseInstanceId: string;
       initialChainTail: string;
+      durabilityProfileDigest: string;
     }>;
     output: Readonly<{
       path: string;
@@ -132,6 +134,7 @@ export class GraphGenesisExecutionEnvelopeAuthority {
       || !UUID.test(input.dashboardInstanceId)
       || !isDigest(input.bootSessionDigest) || !isDigest(input.audit.schemaDigest)
       || !isDigest(input.audit.fileIdentityDigest) || !isDigest(input.audit.initialChainTail)
+      || !isDigest(input.audit.durabilityProfileDigest)
       || !isDigest(input.output.canonicalPathDigest) || !isDigest(input.output.parentIdentityDigest)
       || input.output.canonicalPathDigest !== digest(input.output.path)
       || !UUID.test(input.audit.databaseInstanceId)
@@ -159,6 +162,7 @@ export class GraphGenesisExecutionEnvelopeAuthority {
       auditFileIdentityDigest: input.audit.fileIdentityDigest,
       auditDatabaseInstanceId: input.audit.databaseInstanceId,
       initialAuditChainTail: input.audit.initialChainTail,
+      auditDurabilityProfileDigest: input.audit.durabilityProfileDigest,
       outputCanonicalPathDigest: input.output.canonicalPathDigest,
       outputParentIdentityDigest: input.output.parentIdentityDigest,
       outputRule: 'exclusive_new_private_file' as const,
@@ -272,8 +276,9 @@ export class ProductionGraphGenesisSessionAuthority implements GraphGenesisStart
       || source.schemaDigest !== envelope.auditSchemaDigest
       || source.fileIdentityDigest !== envelope.auditFileIdentityDigest
       || source.databaseInstanceId !== envelope.auditDatabaseInstanceId
-      || source.initialChainTail !== envelope.initialAuditChainTail) failApproval();
-    const recorder = new ConcreteSqliteAuditRecorder(source.database, now);
+      || source.initialChainTail !== envelope.initialAuditChainTail
+      || source.durabilityProfileDigest !== envelope.auditDurabilityProfileDigest) failApproval();
+    const recorder = new ConcreteSqliteAuditRecorder(source.database, now, 'immediate');
     const audit = source.database.transaction(() => {
       if (!revalidatesExistingGraphGenesisAuditDatabase(source)) failApproval();
       return recorder.begin({
@@ -289,7 +294,7 @@ export class ProductionGraphGenesisSessionAuthority implements GraphGenesisStart
         },
         receipt: graphGenesisReceiptContext(envelope),
       });
-    })();
+    }).immediate();
     this.#auditBindings.set(audit, envelope);
     this.#executionAudits.set(audit, new GraphGenesisAuditGate(
       envelope.planHash,
@@ -645,6 +650,7 @@ export function graphGenesisReceiptContext(envelope: GraphGenesisExecutionEnvelo
       planHash: envelope.planHash,
       policyDigest: envelope.policyDigest,
       auditFileIdentityDigest: envelope.auditFileIdentityDigest,
+      auditDurabilityProfileDigest: envelope.auditDurabilityProfileDigest,
       outputCanonicalPathDigest: envelope.outputCanonicalPathDigest,
     },
     subject: TARGET,

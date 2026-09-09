@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  realpathSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -64,6 +65,37 @@ export function writeDashboardStateFile(
     path: absolutePath,
     remove: () => removeOwnedStateFile(absolutePath, state),
   };
+}
+
+/** Graph-run handoff: requires an existing private parent and never replaces an existing path. */
+export function writeExclusiveDashboardStateFile(
+  path: string,
+  url: string,
+  instanceId: string,
+  pid: number = process.pid,
+  startedAt: Date = new Date(),
+): DashboardStateFile {
+  if (path.trim().length === 0) throw new Error('Dashboard state path must not be empty');
+  validateDashboardUrl(url);
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Dashboard state PID must be a positive integer');
+  if (!isInstanceId(instanceId)) throw new Error('Dashboard state instance ID must be a UUID');
+  const absolutePath = resolve(path);
+  const parent = dirname(absolutePath);
+  if (realpathSync(parent) !== parent) throw new Error('Dashboard state parent must be canonical');
+  const parentStatus = lstatSync(parent);
+  const currentUser = typeof process.geteuid === 'function' ? process.geteuid() : parentStatus.uid;
+  if (!parentStatus.isDirectory() || parentStatus.isSymbolicLink() || parentStatus.uid !== currentUser
+    || (parentStatus.mode & 0o777) !== 0o700) throw new Error('Dashboard state parent must be private');
+  const state: DashboardState = {
+    version: 1, url, pid, started_at: startedAt.toISOString(), instance_id: instanceId,
+  };
+  try {
+    writeFileSync(absolutePath, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    chmodSync(absolutePath, 0o600);
+  } catch (error) {
+    throw new Error(`Could not exclusively create private dashboard state file: ${absolutePath}`, { cause: error });
+  }
+  return { path: absolutePath, remove: () => removeOwnedStateFile(absolutePath, state) };
 }
 
 function ensurePrivateDirectory(path: string): void {

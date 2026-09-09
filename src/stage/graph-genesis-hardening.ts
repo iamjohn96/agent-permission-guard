@@ -739,6 +739,7 @@ export class GraphGenesisAuditGate {
   readonly #events: GraphGenesisAuditEventName[] = [];
   readonly #records: Array<Readonly<{ event: GraphGenesisAuditEventName; payload: Readonly<Record<string, string | number | boolean>> }>> = [];
   readonly #completions = new WeakSet<object>();
+  #payloadBytes = 0;
   #terminal = false;
 
   constructor(
@@ -751,9 +752,14 @@ export class GraphGenesisAuditGate {
   async record(event: GraphGenesisAuditEventName, payload: Readonly<Record<string, string | number | boolean>> = {}): Promise<void> {
     if (this.#terminal) failAudit();
     assertAuditPayload(event, payload);
+    const safePayload = Object.freeze({ ...payload, planHash: this.planHash });
+    const payloadBytes = Buffer.byteLength(canonicalJson(safePayload), 'utf8');
+    if (payloadBytes > 4 * 1024 || this.#records.length >= 1_024
+      || this.#payloadBytes + payloadBytes > 2 * 1024 * 1024) failAudit();
     try {
-      await this.sink.append(event, Object.freeze({ ...payload, planHash: this.planHash }));
+      await this.sink.append(event, safePayload);
     } catch { failAudit(); }
+    this.#payloadBytes += payloadBytes;
     this.#events.push(event);
     this.#records.push(deepFreeze({ event, payload: { ...payload } }));
     if (event === 'genesis_complete' || event === 'genesis_incomplete') this.#terminal = true;

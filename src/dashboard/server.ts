@@ -1,6 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { Socket } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +16,7 @@ export type DashboardHandle = Readonly<{
   url: string;
   instanceId: string;
   close(): Promise<void>;
+  bindGraphAction(actionId: string): void;
 }>;
 
 export async function startDashboard(options: Readonly<{
@@ -24,7 +26,7 @@ export async function startDashboard(options: Readonly<{
   policies?: LivePolicyController;
   token: string;
   port?: number;
-  mode?: 'full' | 'approval_audit_only';
+  mode?: 'full' | 'approval_audit_only' | 'graph_run';
 }>): Promise<DashboardHandle> {
   if (options.token.length < 32) throw new Error('Dashboard token must be at least 32 characters');
   const mode = options.mode ?? 'full';
@@ -32,15 +34,21 @@ export async function startDashboard(options: Readonly<{
     throw new Error('Full Dashboard mode requires policy and audit services');
   }
   const instanceId = randomUUID();
+  const runtime = { tokenValid: true, graphActionId: undefined as string | undefined };
   const assets = loadAssets();
   const server = createServer((request, response) => {
-    void handleRequest(request, response, { ...options, mode, instanceId }, assets, server.address()).catch((error: unknown) => {
+    void handleRequest(request, response, { ...options, mode, instanceId, runtime }, assets, server.address()).catch((error: unknown) => {
       if (error instanceof DashboardHttpError) return sendJson(response, error.status, { error: error.message });
       if (error instanceof PolicyConflictError) return sendJson(response, 409, { error: error.message });
       if (error instanceof PolicyLoadError) return sendJson(response, 400, { error: error.message });
       process.stderr.write('[apg] dashboard request failed\n');
       return sendJson(response, 500, { error: 'Internal dashboard error' });
     });
+  });
+  const sockets = new Set<Socket>();
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -61,8 +69,24 @@ export async function startDashboard(options: Readonly<{
   return {
     url: `${origin}/#token=${encodeURIComponent(options.token)}`,
     instanceId,
+    bindGraphAction: (actionId) => {
+      if (mode !== 'graph_run' || runtime.graphActionId !== undefined
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(actionId)) {
+        throw new Error('Graph Dashboard action binding is invalid');
+      }
+      runtime.graphActionId = actionId;
+    },
     close: () => new Promise<void>((resolve, reject) => {
-      server.close((error) => error === undefined ? resolve() : reject(error));
+      runtime.tokenValid = false;
+      const force = setTimeout(() => {
+        for (const socket of sockets) socket.destroy();
+      }, 250);
+      force.unref();
+      server.close((error) => {
+        clearTimeout(force);
+        for (const socket of sockets) socket.destroy();
+        error === undefined ? resolve() : reject(error);
+      });
     }),
   };
 }
@@ -82,7 +106,8 @@ async function handleRequest(
     policies?: LivePolicyController;
     token: string;
     instanceId: string;
-    mode: 'full' | 'approval_audit_only';
+    mode: 'full' | 'approval_audit_only' | 'graph_run';
+    runtime: { tokenValid: boolean; graphActionId: string | undefined };
   }>,
   assets: Assets,
   address: ReturnType<ReturnType<typeof createServer>['address']>,
@@ -98,24 +123,41 @@ async function handleRequest(
     if (!isAllowedOrigin(request.headers.origin, expectedOrigin)) {
       return sendJson(response, 403, { error: 'Invalid origin' });
     }
-    if (!isAuthorized(request.headers.authorization, services.token)) return sendJson(response, 401, { error: 'Unauthorized' });
+    if (!services.runtime.tokenValid || !isAuthorized(request.headers.authorization, services.token)) {
+      return sendJson(response, 401, { error: 'Unauthorized' });
+    }
 
     if (request.method === 'GET' && url.pathname === '/api/health') {
       return sendJson(response, 200, {
         status: 'ok',
         api_version: 1,
         instance_id: services.instanceId,
-        capabilities: services.mode === 'full' ? ['approvals', 'audit', 'policy'] : ['approvals', 'audit'],
+        capabilities: services.mode === 'full'
+          ? ['approvals', 'audit', 'policy']
+          : services.mode === 'graph_run'
+            ? services.runtime.graphActionId === undefined ? [] : ['approvals', 'current_action_audit']
+            : ['approvals', 'audit'],
       });
     }
     if (request.method === 'GET' && url.pathname === '/api/approvals') {
-      return sendJson(response, 200, { approvals: services.approvals.listPending() });
+      if (services.mode === 'graph_run' && services.runtime.graphActionId === undefined) {
+        return sendJson(response, 409, { error: 'Graph action is not bound' });
+      }
+      return sendJson(response, 200, {
+        approvals: services.mode === 'graph_run'
+          ? graphPendingApprovals(services)
+          : services.approvals.listPending(),
+      });
     }
     if (request.method === 'GET' && url.pathname === '/api/audit') {
       const rawLimit = url.searchParams.get('limit') ?? '50';
       if (!/^\d{1,3}$/.test(rawLimit)) return sendJson(response, 400, { error: 'Invalid audit limit' });
       const limit = Number(rawLimit);
       if (limit < 1 || limit > 100) return sendJson(response, 400, { error: 'Audit limit must be between 1 and 100' });
+      if (services.mode === 'graph_run') {
+        if (services.runtime.graphActionId === undefined) return sendJson(response, 409, { error: 'Graph action is not bound' });
+        return sendJson(response, 200, services.audit.getAction(services.runtime.graphActionId));
+      }
       return sendJson(response, 200, services.audit.listRecent(limit));
     }
     if (request.method === 'GET' && url.pathname === '/api/policy') {
@@ -182,6 +224,9 @@ async function handleRequest(
       const id = match[1];
       const action = match[2];
       if (id === undefined || action === undefined) return sendJson(response, 400, { error: 'Invalid approval request' });
+      if (services.mode === 'graph_run' && !graphPendingApprovals(services).some((request) => request.id === id)) {
+        return sendJson(response, 404, { error: 'Approval is not in the current Graph action' });
+      }
       const outcome = services.approvals.decide(id, action === 'approve' ? 'approved' : 'denied');
       if (outcome === undefined) return sendJson(response, 404, { error: 'Approval is no longer pending' });
       if (outcome === 'expired') return sendJson(response, 409, { error: 'Approval expired' });
@@ -199,6 +244,24 @@ async function handleRequest(
     'Cache-Control': 'no-store',
   });
   response.end(asset.body);
+}
+
+function graphPendingApprovals(services: Readonly<{
+  approvals: ApprovalCoordinator;
+  audit: AuditQueryService;
+  runtime: { graphActionId: string | undefined };
+}>): ReturnType<ApprovalCoordinator['listPending']> {
+  if (services.runtime.graphActionId === undefined) return [];
+  const action = services.audit.getAction(services.runtime.graphActionId).calls[0];
+  const argumentsValue = typeof action?.arguments === 'object' && action.arguments !== null && !Array.isArray(action.arguments)
+    ? action.arguments as Record<string, unknown> : undefined;
+  const executionEnvelopeHash = argumentsValue?.executionEnvelopeHash;
+  if (typeof executionEnvelopeHash !== 'string' || !/^[a-f0-9]{64}$/u.test(executionEnvelopeHash)) return [];
+  return services.approvals.listPending().filter((request) => {
+    const requestArguments = typeof request.arguments === 'object' && request.arguments !== null && !Array.isArray(request.arguments)
+      ? request.arguments as Record<string, unknown> : undefined;
+    return request.kind === 'graph_genesis' && requestArguments?.executionEnvelopeHash === executionEnvelopeHash;
+  });
 }
 
 class DashboardHttpError extends Error {

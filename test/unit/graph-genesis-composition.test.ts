@@ -19,6 +19,7 @@ import { ExactGraphCandidateAuthority } from '../../src/stage/exact-production-g
 import {
   GraphGenesisCandidateArtifactAuthority,
   GraphGenesisCandidateArtifactImporter,
+  ProductionGraphGenesisTerminalProofSource,
 } from '../../src/stage/graph-genesis-candidate-artifact.js';
 import { PostStateBoundGraphGenesisCleanupAuthority } from '../../src/stage/graph-genesis-cleanup.js';
 import {
@@ -56,11 +57,15 @@ afterEach(() => {
 });
 
 describe('production Graph Genesis approval and execution composition foundation', () => {
-  it('keeps the foundation free of public DNS, HTTPS, npm spawn, and production CLI wiring', () => {
+  it('keeps the composition foundation free of public DNS, HTTPS, and npm spawn while the CLI stays fail-closed', () => {
     const source = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-composition.ts'), 'utf8');
     expect(source).not.toMatch(/node:dns|node:https|SystemRegistryAddressResolver|NodePinnedHttpsClient|NodeGraphGenesisSpawnAdapter/);
     expect(source).not.toMatch(/import\s+\{[^}]*\bspawn\b|\bexecFile\s*\(|npm-cli/);
-    expect(readFileSync(join(process.cwd(), 'src/cli/main.ts'), 'utf8')).not.toContain('graph genesis');
+    const cli = readFileSync(join(process.cwd(), 'src/cli/main.ts'), 'utf8');
+    const readiness = readFileSync(join(process.cwd(), 'src/cli/graph-genesis.ts'), 'utf8');
+    expect(cli).toContain('runGraphGenesisReadiness');
+    expect(readiness).toContain("reasonCode: 'live_execution_not_enabled'");
+    expect(readiness).not.toMatch(/node:dns|node:https|node:child_process|openAuditDatabase|startDashboard|npm-cli/);
   });
 
   it('binds the exact envelope, persists approval before visibility, and issues a two-phase one-time start lease', async () => {
@@ -133,7 +138,7 @@ describe('production Graph Genesis approval and execution composition foundation
       await result.executionAudit.record('npm_terminal_observed', {
         status: 'completed', exitCode: 0, stdoutBytes: 0, stderrBytes: 0,
       });
-      audit.markExecutionResult({
+      audit.finalizeGraphGenesisOutcome({
         metadata: { externalReadStatus: 'validated', requestCount: 1, uniquePackageCount: 1, responseBytes: 128 },
         process: { status: 'completed', exitCode: 0, stdoutBytes: 0, stderrBytes: 0 },
         candidate: {
@@ -143,7 +148,7 @@ describe('production Graph Genesis approval and execution composition foundation
         },
         cleanup: { status: 'complete' },
         terminalAudit: { status: 'complete' },
-      }, false);
+      }, 'completed');
       const complete = new PortableReceiptService(database, recorder).exportAction(audit.actionId);
       expect(complete.outcome?.receipt.execution.observedResult).toMatchObject({
         kind: 'graph_genesis', externalReadStatus: 'validated', cleanupStatus: 'complete', terminalAuditStatus: 'complete',
@@ -156,6 +161,21 @@ describe('production Graph Genesis approval and execution composition foundation
       expect(terminalEvents).toEqual([
         { event_type: 'graph_genesis_complete' }, { event_type: 'outcome_receipt_finalized' },
       ]);
+      const productionProof = new ProductionGraphGenesisTerminalProofSource(source.canonicalPath);
+      expect(productionProof.hasCompleteTerminalProof({
+        actionId: audit.actionId,
+        executionEnvelopeHash: prepared.envelope.executionEnvelopeHash,
+        planHash: prepared.envelope.planHash,
+        candidateDigest: '7'.repeat(64),
+        artifactDigest: '8'.repeat(64),
+      })).toBe(true);
+      expect(productionProof.hasCompleteTerminalProof({
+        actionId: audit.actionId,
+        executionEnvelopeHash: prepared.envelope.executionEnvelopeHash,
+        planHash: prepared.envelope.planHash,
+        candidateDigest: '7'.repeat(64),
+        artifactDigest: '9'.repeat(64),
+      })).toBe(false);
     } finally {
       approvals.close();
       database.close();
@@ -265,6 +285,9 @@ describe('production Graph Genesis approval and execution composition foundation
       expect(opened).toMatchObject({ canonicalPath: path, initialChainTail: '0'.repeat(64) });
       expect(opened.schemaDigest).toMatch(/^[a-f0-9]{64}$/u);
       expect(opened.fileIdentityDigest).toMatch(/^[a-f0-9]{64}$/u);
+      expect(opened.durabilityProfileDigest).toMatch(/^[a-f0-9]{64}$/u);
+      expect(opened.database.pragma('journal_mode', { simple: true })).toBe('wal');
+      expect(opened.database.pragma('synchronous', { simple: true })).toBe(2);
       expect(opened.database.prepare('SELECT version FROM schema_migrations ORDER BY version').all())
         .toEqual([{ version: 1 }, { version: 2 }]);
     } finally { opened.database.close(); }
@@ -414,6 +437,7 @@ function envelopeFixture(
       fileIdentityDigest: auditSource?.fileIdentityDigest ?? '3'.repeat(64),
       databaseInstanceId: auditSource?.databaseInstanceId ?? '22222222-2222-4222-8222-222222222222',
       initialChainTail: auditSource?.initialChainTail ?? '4'.repeat(64),
+      durabilityProfileDigest: auditSource?.durabilityProfileDigest ?? '5'.repeat(64),
     },
     output: {
       path: outputPath,

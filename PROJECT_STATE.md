@@ -2,8 +2,17 @@
 
 ## Current Milestone
 
-The Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on 2026-09-08.
-Its network-free foundation is implemented locally: exact execution envelope, durable-before-visible local
+The Exact Production Graph Genesis Live Run Readiness Architecture Check was accepted on 2026-09-09. Its first
+network-free readiness foundation is implemented locally and uncommitted: exact effect-free CLI parsing,
+fail-closed path/environment readiness, WAL/FULL/integrity/sidecar durability identity, immediate and bounded
+Graph audit records, closed detailed terminal outcomes, action/envelope-scoped Dashboard approval/audit,
+exclusive state handoff, durable candidate readback/fsync and DB-backed terminal proof. The public command
+remains deliberately disabled until the non-injectable production owner joins every phase. No real action occurred. See
+`docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md`.
+
+The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
+2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,
+durable-before-visible local
 one-time approval, authenticated existing-schema DB opener with pre-session identity/schema/chain revalidation,
 receipt 1.2, central abort/inert-child composition, two-phase
 start lease, tracked listener drain, post-state-bound cleanup, and a terminal-proof-bound candidate artifact.
@@ -212,8 +221,10 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## In Progress
 
-- Production approval/execution composition network-free foundation is implemented and under final review;
-  the real public-metadata action remains a separate live one-time approval.
+- Exact Production Graph Genesis live-run readiness architecture is accepted and its first fail-closed
+  foundation is implemented locally. It is not committed and the real action remains unavailable.
+- The existing composition foundation is committed and pushed at `6108936`; the working tree was clean at
+  the new Architecture Check baseline.
 - The execution envelope binds the exact plan/projection, Dashboard instance, runtime, policy,
   persistent audit sink, candidate output, limits and deadlines. The closed preflight hash is never reused.
 - Broker arm and process spawn now require distinct one-time consumptions of the same authenticated start
@@ -221,8 +232,8 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 - Receipt schema 1.2 and a terminal-audit-bound candidate artifact let later stages verify the
   observed graph without treating a copied/orphan file as launch or profile authority.
 - A closed rehearsal report remains evidence-only, not reusable approval or execution authority. The public
-  CLI, real production transport/process composition, exact live sink/output preflight and one-time real-run
-  approval remain blockers.
+  CLI grammar exists but returns `live_execution_not_enabled`; the non-injectable owner joining fresh capture,
+  live sink/Dashboard, real transport/process, post-state/output/cleanup and reconciliation remains the blocker.
 - The implemented preflight audit adapter reuses the current schema only in a new owned temporary DB, with namespaced
   preflight events, a dedicated parent row and committed/reopened chain verification; it creates no receipt
   or fictional approval and does not open the product audit database.
@@ -334,6 +345,13 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Tests
 
+- Live-run readiness focused coverage: 42 passed across exact CLI grammar, effect-free fail-closed route,
+  action/envelope-scoped Dashboard approval and audit, exclusive state handoff, WAL/FULL/integrity/sidecar
+  durability identity, immediate bounded Graph audit, `output_overflow` incomplete receipt evidence,
+  candidate final readback/parent fsync and read-only DB-backed terminal proof.
+- Current full network-free regression: 283 passed, 3 skipped on 2026-09-09. Build, typecheck and whitespace
+  checks passed. No product DB, public DNS/registry, npm/npx, real candidate/state output, package download,
+  installation, package code, dependency/migration, credential/config read, publish or push occurred.
 - Production Graph Genesis composition focused coverage: 10 tests for static no-network/no-real-spawn wiring,
   exact envelope/private capsule substitution, durable-before-visible approval failure, approve/deny/replay,
   receipt 1.2 and atomic terminal evidence, approval/audit-only Dashboard mode, existing private schema open
@@ -418,6 +436,11 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Current Risks
 
+- There is no owned production live-run constructor yet. The public Graph Genesis route is deliberately
+  fail-closed and the low-level production adapters remain disconnected.
+- Terminal Outcome Receipt detail, action/envelope-scoped Dashboard data, DB durability identity, final
+  candidate readback/parent fsync and read-only terminal proof are implemented, but are not yet composed by
+  one production owner or tested by a real action.
 - The production-shaped listener, transport, supervisor, post-state, cleanup, and completion authorities have
   network-free evidence but have not performed one real combined npm/registry run.
 - An existing exact private SQLite schema can now be opened without migration and bound into an execution
@@ -439,9 +462,8 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Next Recommended Task
 
-Review, commit and push the accepted network-free composition foundation. Then prepare an Exact Production
-Graph Genesis Live Run Readiness Architecture Check that proves the internal owned production constructor,
-fresh audit/output identities, local Dashboard handoff, cancellation/reconciliation paths, and exact operator
-commands. Do not connect or execute real npm/npx, public DNS/registry, the product DB or a real candidate output
-until that fresh plan is accepted and its one-time Dashboard approval is presented. Continue in this chat as
-requested by the user.
+Review and, if accepted, commit and push the fail-closed Live Run Readiness foundation. The next implementation
+task is the non-injectable production owner plus a synthetic full-flow twin that joins fresh capture,
+Dashboard/audit session, approval, broker/listener/transport/supervisor, post-state/compiler/output/cleanup,
+one terminal commit and read-only reconciliation. Keep that work network-free; the one-time real acceptance
+remains a later exact command plus the user's live Dashboard decision.

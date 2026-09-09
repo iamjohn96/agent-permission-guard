@@ -17,6 +17,7 @@ const audit: AuditRecorder = {
       markBlocked() {},
       markCompleted() {},
       markExecutionResult() {},
+      finalizeGraphGenesisOutcome() {},
       markFailed() {},
       appendEvidence() {},
     };

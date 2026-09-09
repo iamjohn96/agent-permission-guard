@@ -1,9 +1,10 @@
-import { constants } from 'node:fs';
+import { constants, lstatSync, realpathSync } from 'node:fs';
 import { link, lstat, open, realpath, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 
 import { canonicalJson } from '../audit/canonical-json.js';
+import { openAuditDatabaseReadOnly } from '../db/database.js';
 import type { ExactGraphCandidate, ExactGraphCandidateAuthority } from './exact-production-graph.js';
 import type {
   GraphGenesisExecutionEnvelopeAuthority,
@@ -51,6 +52,79 @@ export type CandidateTerminalProofQuery = Readonly<{
 
 export interface GraphGenesisCandidateTerminalProofSource {
   hasCompleteTerminalProof(query: CandidateTerminalProofQuery): boolean | Promise<boolean>;
+}
+
+/** Production proof source: one exact private DB path, reopened read-only for each reconciliation. */
+export class ProductionGraphGenesisTerminalProofSource implements GraphGenesisCandidateTerminalProofSource {
+  readonly #canonicalAuditPath: string;
+
+  constructor(auditPath: string) {
+    const canonical = realpathSync(auditPath);
+    const parent = lstatSync(dirname(canonical));
+    const file = lstatSync(canonical);
+    const currentUser = typeof process.geteuid === 'function' ? process.geteuid() : file.uid;
+    if (canonical !== auditPath || !parent.isDirectory() || parent.isSymbolicLink()
+      || parent.uid !== currentUser || (parent.mode & 0o777) !== 0o700
+      || !file.isFile() || file.isSymbolicLink() || file.nlink !== 1
+      || file.uid !== currentUser || (file.mode & 0o777) !== 0o600) fail();
+    this.#canonicalAuditPath = canonical;
+  }
+
+  hasCompleteTerminalProof(query: CandidateTerminalProofQuery): boolean {
+    const database = openAuditDatabaseReadOnly(this.#canonicalAuditPath);
+    try {
+      const events = database.prepare(`
+        SELECT event_type, event_json, previous_hash, event_hash
+        FROM audit_events ORDER BY sequence
+      `).all() as Array<{ event_type: string; event_json: string; previous_hash: string; event_hash: string }>;
+      let tail = '0'.repeat(64);
+      for (const event of events) {
+        if (event.previous_hash !== tail || sha256(`${event.previous_hash}\n${event.event_json}`) !== event.event_hash) return false;
+        tail = event.event_hash;
+      }
+      const action = database.prepare(`
+        SELECT status, arguments_json FROM tool_calls WHERE id = ? AND server_id = 'apg-graph-genesis'
+      `).get(query.actionId) as { status: string; arguments_json: string } | undefined;
+      if (action?.status !== 'completed') return false;
+      const argumentsValue = JSON.parse(action.arguments_json) as Record<string, unknown>;
+      if (argumentsValue.executionEnvelopeHash !== query.executionEnvelopeHash || argumentsValue.planHash !== query.planHash) return false;
+      const actionEvents = events.filter((event) => {
+        const parsed = JSON.parse(event.event_json) as { toolCallId?: unknown };
+        return parsed.toolCallId === query.actionId;
+      });
+      if (actionEvents.filter((event) => event.event_type === 'graph_genesis_complete').length !== 1
+        || actionEvents.filter((event) => event.event_type === 'outcome_receipt_finalized').length !== 1) return false;
+      const outcomeEvent = actionEvents.find((event) => event.event_type === 'outcome_receipt_finalized');
+      const completeEvent = actionEvents.find((event) => event.event_type === 'graph_genesis_complete');
+      if (outcomeEvent === undefined || completeEvent === undefined
+        || actionEvents.indexOf(completeEvent) >= actionEvents.indexOf(outcomeEvent)) return false;
+      const parsedOutcome = JSON.parse(outcomeEvent.event_json) as {
+        details?: { receiptDigest?: unknown; receipt?: { action?: { executionPlanHash?: unknown }; execution?: {
+          terminalStatus?: unknown;
+          observedResult?: Record<string, unknown>;
+        } } };
+      };
+      const parsedComplete = JSON.parse(completeEvent.event_json) as {
+        details?: { executionPlanHash?: unknown; terminalStatus?: unknown; outcomeReceiptDigest?: unknown };
+      };
+      const receipt = parsedOutcome.details?.receipt;
+      const observed = receipt?.execution?.observedResult;
+      const computedReceiptDigest = receipt === undefined
+        ? undefined : `sha256:${sha256(canonicalJson(receipt))}`;
+      return parsedOutcome.details?.receiptDigest === computedReceiptDigest
+        && parsedComplete.details?.outcomeReceiptDigest === computedReceiptDigest
+        && parsedComplete.details?.executionPlanHash === query.executionEnvelopeHash
+        && parsedComplete.details?.terminalStatus === 'completed'
+        && receipt?.action?.executionPlanHash === query.executionEnvelopeHash
+        && receipt.execution?.terminalStatus === 'completed'
+        && observed?.kind === 'graph_genesis'
+        && observed.candidateDigest === `sha256:${query.candidateDigest}`
+        && observed.candidateArtifactDigest === `sha256:${query.artifactDigest}`
+        && observed.terminalAuditStatus === 'complete';
+    } catch {
+      return false;
+    } finally { database.close(); }
+  }
 }
 
 export class GraphGenesisCandidateArtifactAuthority {
@@ -156,8 +230,26 @@ export class GraphGenesisCandidateArtifactAuthority {
         || outputInfo.uid !== currentUser || (outputInfo.mode & 0o777) !== 0o600
         || outputInfo.size !== bytes.byteLength) fail();
       await unlink(pending);
-      const finalInfo = await lstat(outputPath);
-      if (finalInfo.nlink !== 1) fail();
+      const finalHandle = await open(outputPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const finalInfo = await finalHandle.stat();
+        if (!finalInfo.isFile() || finalInfo.nlink !== 1 || finalInfo.uid !== currentUser
+          || (finalInfo.mode & 0o777) !== 0o600 || finalInfo.size !== bytes.byteLength) fail();
+        const readback = await finalHandle.readFile();
+        if (!readback.equals(bytes)) fail();
+        const rereadArtifact = parseArtifact(new TextDecoder('utf-8', { fatal: true }).decode(readback));
+        if (rereadArtifact.artifactDigest !== input.artifact.artifactDigest) fail();
+        const finalAfterRead = await finalHandle.stat();
+        if (finalAfterRead.dev !== finalInfo.dev || finalAfterRead.ino !== finalInfo.ino
+          || finalAfterRead.size !== finalInfo.size || finalAfterRead.mtimeMs !== finalInfo.mtimeMs
+          || finalAfterRead.ctimeMs !== finalInfo.ctimeMs) fail();
+      } finally { await finalHandle.close(); }
+      const parentHandle = await open(parent, constants.O_RDONLY | constants.O_DIRECTORY);
+      try { await parentHandle.sync(); } finally { await parentHandle.close(); }
+      const parentFinal = await lstat(parent);
+      if (parentFinal.dev !== parentBefore.dev || parentFinal.ino !== parentBefore.ino
+        || parentFinal.uid !== currentUser || (parentFinal.mode & 0o777) !== 0o700
+        || await realpath(outputPath) !== outputPath) fail();
       return Object.freeze({
         pathDigest: input.envelope.outputCanonicalPathDigest,
         artifactDigest: input.artifact.artifactDigest,

@@ -571,6 +571,7 @@ class PostExecutionFailingAuditRecorder implements AuditRecorder {
       markBlocked() {},
       markCompleted() {},
       markExecutionResult() { throw new Error('private audit storage failure'); },
+      finalizeGraphGenesisOutcome() { throw new Error('private audit storage failure'); },
       markFailed() {},
       appendEvidence() {},
     };

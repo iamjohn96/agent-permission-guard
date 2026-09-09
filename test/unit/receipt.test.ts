@@ -25,6 +25,34 @@ afterEach(() => {
 });
 
 describe('portable unsigned receipt', () => {
+  it('records Graph output overflow with detailed incomplete external-read evidence', () => {
+    const database = openAuditDatabase(':memory:');
+    const recorder = new SqliteAuditRecorder(database);
+    const call = recorder.begin(
+      { serverId: 'apg-graph-genesis', toolName: 'filesystem_metadata_graph', arguments: {} },
+      { ...receiptDecision('forward'), receipt: graphReceiptContext() },
+    );
+    call.markAuthorized();
+    call.markExecutionStarted();
+    call.finalizeGraphGenesisOutcome({
+      metadata: { externalReadStatus: 'incomplete', requestCount: 1, uniquePackageCount: 1, responseBytes: 128 },
+      process: { status: 'output_overflow', exitCode: null, stdoutBytes: 262144, stderrBytes: 0 },
+      cleanup: { status: 'quarantined', quarantineReferenceDigest: `sha256:${'c'.repeat(64)}` },
+      terminalAudit: { status: 'complete' },
+      errorCode: 'output_overflow',
+    }, 'incomplete_external_read');
+    const envelope = new PortableReceiptService(database, recorder).exportAction(call.actionId);
+    expect(envelope.outcome?.receipt.execution).toMatchObject({
+      terminalStatus: 'incomplete_external_read',
+      observedResult: {
+        kind: 'graph_genesis', executionStatus: 'output_overflow', externalReadStatus: 'incomplete',
+        cleanupStatus: 'quarantined', terminalAuditStatus: 'complete', errorCode: 'output_overflow',
+      },
+    });
+    expect(verifyPortableReceipt(serializePortableReceipt(envelope))).toMatchObject({ valid: true, status: 'incomplete' });
+    database.close();
+  });
+
   it('exports and independently verifies linked authorization and outcome evidence without sensitive output', () => {
     const database = openAuditDatabase(':memory:');
     const recorder = new SqliteAuditRecorder(database);
@@ -317,6 +345,19 @@ function installReceiptContext(subject: string): ReceiptContext {
       contentDigest: `sha256:${'b'.repeat(64)}`,
       evaluatorName: 'fixture_evaluator',
       evaluatorVersion: '1',
+    },
+  };
+}
+
+function graphReceiptContext(): ReceiptContext {
+  return {
+    adapter: 'graph_genesis', adapterVersion: '1', operation: 'filesystem_metadata_graph',
+    boundary: 'graph_genesis_plan', identityAssurance: 'execution_plan_exact',
+    identityMaterial: { executionEnvelopeHash: 'd'.repeat(64) },
+    subject: '@modelcontextprotocol/server-filesystem@2026.7.10', executionPlanHash: 'd'.repeat(64),
+    policy: {
+      schemaVersion: 1, contentDigest: `sha256:${'e'.repeat(64)}`,
+      evaluatorName: 'graph_genesis_builtin_policy', evaluatorVersion: '1',
     },
   };
 }

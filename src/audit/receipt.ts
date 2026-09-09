@@ -240,7 +240,7 @@ const ObservedResultSchema = z.object({
   isError: z.boolean(),
   contentTypes: z.array(IdentifierSchema).max(20).optional(),
   contentCount: z.number().int().min(0).max(1_000_000).optional(),
-  executionStatus: z.enum(['completed', 'failed', 'timed_out', 'cancelled']).optional(),
+  executionStatus: z.enum(['completed', 'failed', 'timed_out', 'cancelled', 'output_overflow']).optional(),
   exitCode: z.number().int().nullable().optional(),
   durationMs: z.number().int().min(0).max(86_400_000).optional(),
   stdoutBytes: z.number().int().min(0).optional(),
