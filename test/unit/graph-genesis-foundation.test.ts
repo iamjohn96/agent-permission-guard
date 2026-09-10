@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:net';
@@ -68,6 +68,8 @@ describe('bounded metadata-only graph genesis network-free foundation', () => {
     expect(fixture.plan.launch.args.indexOf('--ignore-scripts'))
       .toBe(fixture.plan.launch.args.indexOf('--maxsockets=4') + 1);
     expect(fixture.plan.launch.args).toContain('--ignore-scripts');
+    expect(fixture.plan.launch.args.filter((argument) => argument.startsWith('--prefix=')))
+      .toEqual([`--prefix=${fixture.workspace.rootRealpath}`]);
     expect(fixture.plan.launch.args).not.toContain('--allow-child-process');
     expect(fixture.plan.launch.env).toEqual({
       HOME: fixture.workspace.rootRealpath,
@@ -83,6 +85,15 @@ describe('bounded metadata-only graph genesis network-free foundation', () => {
       .toThrowError(expect.objectContaining({ code: 'approval_invalid' }));
     expect(() => fixture.planAuthority.assertAuthenticates({ ...fixture.plan }))
       .toThrowError(expect.objectContaining({ code: 'artifact_plan_invalid' }));
+  });
+
+  it('keeps npm project state at the workspace root and rejects the legacy nested prefix', async () => {
+    const fixture = await genesisFixture();
+    expect(existsSync(join(fixture.workspace.rootRealpath, 'prefix'))).toBe(false);
+    writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(lockFixture()));
+    mkdirSync(join(fixture.workspace.rootRealpath, 'prefix'), { mode: 0o700 });
+    await expect(fixture.workspaceAuthority.validateSyntheticPostState(fixture.workspace, lockFixture()))
+      .rejects.toMatchObject({ code: 'artifact_plan_invalid' });
   });
 
   it('accepts only the canonical broker route, constructs the registry URL, and retains a safe ledger', async () => {

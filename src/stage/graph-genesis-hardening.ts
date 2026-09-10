@@ -275,7 +275,7 @@ export class FinalizedGraphGenesisWorkspaceAuthority {
     const rootRealpath = await realpath(root);
     const rootInfo = await stat(rootRealpath);
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || (rootInfo.mode & 0o777) !== 0o700) failPlan();
-    for (const directory of ['cache', 'logs', 'tmp', 'prefix']) await mkdir(join(rootRealpath, directory), { mode: 0o700 });
+    for (const directory of ['cache', 'logs', 'tmp']) await mkdir(join(rootRealpath, directory), { mode: 0o700 });
     await exclusiveFile(join(rootRealpath, 'package.json'), CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES);
     await exclusiveFile(join(rootRealpath, 'user.npmrc'), '');
     await exclusiveFile(join(rootRealpath, 'global.npmrc'), '');

@@ -284,7 +284,7 @@ export class GraphGenesisWorkspaceAuthority {
     const rootRealpath = await realpath(root);
     const rootInfo = await stat(rootRealpath);
     if (!rootInfo.isDirectory() || (rootInfo.mode & 0o777) !== 0o700) failPlan();
-    for (const directory of ['cache', 'logs', 'tmp', 'prefix']) await mkdir(join(rootRealpath, directory), { mode: 0o700 });
+    for (const directory of ['cache', 'logs', 'tmp']) await mkdir(join(rootRealpath, directory), { mode: 0o700 });
     await exclusiveFile(join(rootRealpath, 'package.json'), CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES);
     await exclusiveFile(join(rootRealpath, 'user.npmrc'), '');
     await exclusiveFile(join(rootRealpath, 'global.npmrc'), '');
@@ -318,7 +318,7 @@ export class GraphGenesisWorkspaceAuthority {
     this.assertAuthenticates(workspace);
     const current = await lstat(workspace.rootRealpath);
     if (current.dev !== workspace.device || current.ino !== workspace.inode || (current.mode & 0o777) !== 0o700) failPlan();
-    const allowedTop = new Set(['package.json', 'package-lock.json', 'user.npmrc', 'global.npmrc', 'broker-profile.sb', 'cache', 'logs', 'tmp', 'prefix']);
+    const allowedTop = new Set(['package.json', 'package-lock.json', 'user.npmrc', 'global.npmrc', 'broker-profile.sb', 'cache', 'logs', 'tmp']);
     const dir = await opendir(workspace.rootRealpath);
     for await (const item of dir) {
       if (!allowedTop.has(item.name) || item.name === 'node_modules' || item.isSymbolicLink()) failPlan();
@@ -375,7 +375,7 @@ export function buildGraphGenesisLaunch(input: Readonly<{
     '--allow-remote=none', '--replace-registry-host=never',
     `--registry=http://127.0.0.1:${input.brokerPort}/${input.routeToken}/`,
     `--cache=${join(workspace, 'cache')}`, `--userconfig=${join(workspace, 'user.npmrc')}`,
-    `--globalconfig=${join(workspace, 'global.npmrc')}`, `--prefix=${join(workspace, 'prefix')}`,
+    `--globalconfig=${join(workspace, 'global.npmrc')}`, `--prefix=${workspace}`,
     `--logs-dir=${join(workspace, 'logs')}`, '--loglevel=warn',
   ]);
   const env = deepFreeze({

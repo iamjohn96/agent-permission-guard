@@ -92,8 +92,13 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
   it('binds fixed save-prod and four-socket launch semantics to the plan and rejects altered variants', async () => {
     const fixture = await planFixture();
     const launch = fixture.prepareInput.launch;
+    const prefix = `--prefix=${fixture.workspace.rootRealpath}`;
+    const prefixIndex = launch.args.indexOf(prefix);
     expect(launch.args.filter((argument) => argument === '--save-prod')).toHaveLength(1);
     expect(launch.args.filter((argument) => argument === '--maxsockets=4')).toHaveLength(1);
+    expect(launch.args.filter((argument) => argument.startsWith('--prefix='))).toEqual([prefix]);
+    expect(prefixIndex).toBeGreaterThan(0);
+    expect(existsSync(join(fixture.workspace.rootRealpath, 'prefix'))).toBe(false);
     expect(fixture.prepared.plan.limits.broker).toEqual(limits().broker);
     const liveOwner = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live.ts'), 'utf8');
     expect(liveOwner).toContain('uniquePackageNames: 128, totalRequests: 256, concurrentRequests: 4');
@@ -101,6 +106,9 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     const saveProdRemoved = launch.args.filter((argument) => argument !== '--save-prod');
     const saveProdMoved = [...saveProdRemoved];
     saveProdMoved.splice(saveProdMoved.indexOf('--maxsockets=4') + 1, 0, '--save-prod');
+    const prefixMoved = [...launch.args];
+    prefixMoved.splice(prefixIndex, 1);
+    prefixMoved.splice(prefixIndex + 1, 0, prefix);
     const variants = [
       launch.args.filter((argument) => argument !== '--maxsockets=4'),
       launch.args.map((argument) => argument === '--maxsockets=4' ? '--maxsockets=8' : argument),
@@ -109,6 +117,10 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       launch.args.map((argument) => argument === '--save-prod' ? '--save-dev' : argument),
       [...launch.args, '--save-prod'],
       saveProdMoved,
+      launch.args.filter((argument) => argument !== prefix),
+      launch.args.map((argument) => argument === prefix ? `--prefix=${join(fixture.workspace.rootRealpath, 'prefix')}` : argument),
+      launch.args.flatMap((argument) => argument === prefix ? [argument, argument] : [argument]),
+      prefixMoved,
     ];
     for (const args of variants) {
       expect(() => fixture.planAuthority.prepare({
@@ -116,6 +128,9 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
         launch: { ...launch, args: Object.freeze(args) },
       })).toThrowError(expect.objectContaining({ code: 'artifact_plan_invalid' }));
     }
+    mkdirSync(join(fixture.workspace.rootRealpath, 'prefix'), { mode: 0o700 });
+    await expect(fixture.workspaceAuthority.revalidateInitial(fixture.workspace))
+      .rejects.toMatchObject({ code: 'artifact_plan_invalid' });
   });
 
   it('revalidates the exact sealed runtime and workspace before spawn', async () => {
@@ -907,6 +922,23 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       executionCapsule: fixture.prepared.capsule,
       workspace: fixture.workspace,
     })).rejects.toMatchObject({ code: 'acceptance_incomplete' });
+  });
+
+  it('rejects a child-created legacy prefix as an inventory failure after a valid root lock', async () => {
+    const fixture = await planFixture();
+    writeValidPostState(fixture.workspace.rootRealpath);
+    mkdirSync(join(fixture.workspace.rootRealpath, 'prefix'), { mode: 0o700 });
+    const postStates = new HardenedGraphGenesisPostStateAuthority(fixture.planAuthority, fixture.workspaceAuthority);
+    let thrown: unknown;
+    try {
+      await postStates.inspect({
+        plan: fixture.prepared.plan,
+        executionCapsule: fixture.prepared.capsule,
+        workspace: fixture.workspace,
+      });
+    } catch (error) { thrown = error; }
+    expect(thrown).toMatchObject({ code: 'acceptance_incomplete' });
+    expect(postStates.claimFailure(thrown)).toEqual({ diagnosticVersion: 1, predicate: 'inventory_rejected' });
   });
 
   it('issues one owner-authenticated, redacted first-failure predicate for every post-state inspection stage', async () => {

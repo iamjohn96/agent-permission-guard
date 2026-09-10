@@ -21,7 +21,7 @@ const TARGET = '@modelcontextprotocol/server-filesystem';
 const VERSION = '2026.7.10';
 const ALLOWED_TOP = new Set([
   'package.json', 'package-lock.json', 'user.npmrc', 'global.npmrc', 'broker-profile.sb',
-  'cache', 'logs', 'tmp', 'prefix',
+  'cache', 'logs', 'tmp',
 ]);
 const POST_STATE_DIAGNOSTIC_PREFIX = '[apg] graph-genesis-post-state-diagnostic ';
 const MAX_POST_STATE_DIAGNOSTIC_BYTES = 1024;

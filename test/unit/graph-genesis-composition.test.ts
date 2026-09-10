@@ -87,6 +87,7 @@ describe('production Graph Genesis approval and execution composition foundation
         containmentEvidenceDigest: fixture.prepared.plan.containmentEvidenceDigest,
       });
       expect(prepared.envelope.launchDigest).toBe(fixture.prepared.plan.launchDigest);
+      expect(fixture.prepared.capsule.launch.launchDigest).toBe(fixture.prepared.plan.launchDigest);
       const { launchDigest, ...legacyLaunch } = fixture.prepared.capsule.launch;
       const legacyLaunchDigest = graphGenesisDigest({
         ...legacyLaunch,
@@ -101,14 +102,22 @@ describe('production Graph Genesis approval and execution composition foundation
         ...legacyLaunch,
         args: legacyLaunch.args.map((argument) => argument === '--save-prod' ? '--save-dev' : argument),
       });
+      const nestedPrefixLaunchDigest = graphGenesisDigest({
+        ...legacyLaunch,
+        args: legacyLaunch.args.map((argument) => argument === `--prefix=${fixture.workspace.rootRealpath}`
+          ? `--prefix=${join(fixture.workspace.rootRealpath, 'prefix')}` : argument),
+      });
       expect(noSaveProdLaunchDigest).not.toBe(launchDigest);
       expect(changedSaveProdLaunchDigest).not.toBe(launchDigest);
+      expect(nestedPrefixLaunchDigest).not.toBe(launchDigest);
       const { executionEnvelopeHash, ...unsignedEnvelope } = prepared.envelope;
       expect(graphGenesisDigest({ ...unsignedEnvelope, launchDigest: legacyLaunchDigest }))
         .not.toBe(executionEnvelopeHash);
       expect(graphGenesisDigest({ ...unsignedEnvelope, launchDigest: noSaveProdLaunchDigest }))
         .not.toBe(executionEnvelopeHash);
       expect(graphGenesisDigest({ ...unsignedEnvelope, launchDigest: changedSaveProdLaunchDigest }))
+        .not.toBe(executionEnvelopeHash);
+      expect(graphGenesisDigest({ ...unsignedEnvelope, launchDigest: nestedPrefixLaunchDigest }))
         .not.toBe(executionEnvelopeHash);
       await expect(executionAudit.record('runtime_snapshot_complete', {
         runtimeManifestDigest: '0'.repeat(64),

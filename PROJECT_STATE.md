@@ -54,6 +54,17 @@ broker limits, no-queue/no-retry, cleanup and terminal semantics remain unchange
 receipt nor DB schema, dependencies, approval logic or parsing, and does not establish a live success. See
 `docs/graph-genesis-v11-predeclared-manifest-architecture-check.md`.
 
+The approved Exact Project Root Binding correction now makes the fixed npm launch use exactly
+`--prefix=<workspace>` rather than the former nested `prefix/` directory. Both workspace
+initializers and post-state inventories reject that legacy directory, while plan reconstruction
+rejects missing, changed, duplicate and moved prefix arguments. The changed launch digest flows
+through the plan, execution capsule and Dashboard envelope; protected manifest binding,
+workspace-root lockfile validation, containment, no-`node_modules`, no-download, broker,
+cleanup and terminal behavior remain unchanged. The related network-free Graph Genesis unit regression
+passed 107/107. No npm, Dashboard, DNS/HTTPS, live execution, product DB, candidate, quarantine,
+prior evidence, dependency, commit or push action occurred. See
+`docs/graph-genesis-exact-project-root-binding-architecture-check.md`.
+
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,
 durable-before-visible local
