@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -51,6 +51,7 @@ import {
 import { SeatbeltLoopbackContainmentAuthority } from '../../src/stage/graph-genesis-containment.js';
 import { LocalSeatbeltContainmentProbeExecutor } from '../../src/stage/graph-genesis-containment-runner.js';
 import {
+  CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES,
   RuntimeTreeSnapshotAuthority,
   buildGraphGenesisLaunch,
 } from '../../src/stage/graph-genesis.js';
@@ -136,6 +137,98 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       mode: 'synthetic',
     })).rejects.toMatchObject({ code: 'artifact_plan_invalid' });
     expect(spawnCalls).toBe(0);
+  });
+
+  it('binds canonical protected-file bytes into workspace identity and rejects legacy or rewritten manifests', async () => {
+    const fixture = await planFixture();
+    const manifestPath = join(fixture.workspace.rootRealpath, 'package.json');
+    const descriptor = fixture.workspace.protectedFiles.find((file) => file.name === 'package.json');
+    expect(readFileSync(manifestPath, 'utf8')).toBe(CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES);
+    expect(descriptor).toMatchObject({
+      mode: 0o600,
+      size: Buffer.byteLength(CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES),
+      sha256: createHash('sha256').update(CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES).digest('hex'),
+    });
+    expect(computeWorkspaceBinding({
+      ...fixture.workspace,
+      protectedFiles: fixture.workspace.protectedFiles.map((file) => file.name === 'package.json'
+        ? { ...file, sha256: '0'.repeat(64) }
+        : file),
+    })).not.toBe(computeWorkspaceBinding(fixture.workspace));
+
+    const mutations: Array<(path: string) => void> = [
+      (path) => writeFileSync(path, '{"name":"apg-graph-genesis","version":"0.0.0","private":true}'),
+      (path) => writeFileSync(path, `${JSON.stringify({
+        dependencies: { '@modelcontextprotocol/server-filesystem': '2026.7.10' },
+        name: 'apg-graph-genesis', private: true, version: '0.0.0',
+      }, null, 2)}\n`),
+      (path) => {
+        renameSync(path, `${path}.replaced`);
+        writeFileSync(path, CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES, { mode: 0o600 });
+        chmodSync(path, 0o600);
+      },
+      (path) => {
+        renameSync(path, `${path}.replaced`);
+        symlinkSync(`${path}.replaced`, path);
+      },
+      (path) => {
+        renameSync(path, `${path}.replaced`);
+        linkSync(`${path}.replaced`, path);
+      },
+    ];
+    for (const mutate of mutations) {
+      const drifted = await planFixture();
+      mutate(join(drifted.workspace.rootRealpath, 'package.json'));
+      const leaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(drifted.planAuthority);
+      const startLease = leaseAuthority.createForTest(drifted.prepared.plan, 10_000);
+      let spawnCalls = 0;
+      const supervisor = new GraphGenesisProcessSupervisor(drifted.planAuthority, {
+        implementationKind: 'synthetic',
+        spawn() { spawnCalls += 1; throw new Error('must not spawn'); },
+      });
+      await expect(supervisor.run({
+        plan: drifted.prepared.plan,
+        capsule: drifted.prepared.capsule,
+        audit: new GraphGenesisAuditGate(drifted.prepared.plan.planHash, new MemoryAuditSink()),
+        startLease, startLeaseVerifier: leaseAuthority, monotonicNow: () => 1,
+        onFailure: () => undefined,
+        mode: 'synthetic',
+      }))
+        .rejects.toMatchObject({ code: 'artifact_plan_invalid' });
+      expect(spawnCalls).toBe(0);
+    }
+
+    const postStateFixture = await planFixture();
+    writeFileSync(join(postStateFixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(exactTargetLock()));
+    const revalidateProtectedFiles = postStateFixture.workspaceAuthority.revalidateProtectedFiles.bind(
+      postStateFixture.workspaceAuthority,
+    );
+    let revalidationCount = 0;
+    postStateFixture.workspaceAuthority.revalidateProtectedFiles = async (workspace) => {
+      const call = ++revalidationCount;
+      await revalidateProtectedFiles(workspace);
+      if (call === 1) {
+        writeFileSync(join(workspace.rootRealpath, 'package.json'), `${JSON.stringify({
+          dependencies: { '@modelcontextprotocol/server-filesystem': '2026.7.10' },
+          name: 'apg-graph-genesis', private: true, version: '0.0.0',
+        }, null, 2)}\n`);
+      }
+    };
+    const postStates = new HardenedGraphGenesisPostStateAuthority(
+      postStateFixture.planAuthority, postStateFixture.workspaceAuthority,
+    );
+    let thrown: unknown;
+    try {
+      await postStates.inspect({
+        plan: postStateFixture.prepared.plan,
+        executionCapsule: postStateFixture.prepared.capsule,
+        workspace: postStateFixture.workspace,
+      });
+    } catch (error) { thrown = error; }
+    expect(postStates.claimFailure(thrown)).toEqual({
+      diagnosticVersion: 1, predicate: 'protected_file_identity_rejected',
+    });
+    expect(revalidationCount).toBe(2);
   });
 
   it.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
@@ -806,10 +899,6 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
   it('rejects archive residue before post-state evidence or candidate compilation', async () => {
     const fixture = await planFixture();
     const lock = exactTargetLock();
-    writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), JSON.stringify({
-      name: 'apg-graph-genesis', version: '0.0.0', private: true,
-      dependencies: { '@modelcontextprotocol/server-filesystem': '2026.7.10' },
-    }));
     writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(lock));
     writeFileSync(join(fixture.workspace.rootRealpath, 'cache/unexpected.tgz'), Buffer.from([0x1f, 0x8b, 0x00]));
     const postStates = new HardenedGraphGenesisPostStateAuthority(fixture.planAuthority, fixture.workspaceAuthority);
@@ -829,8 +918,7 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
         writeValidPostState(fixture.workspace.rootRealpath);
         writeFileSync(join(fixture.workspace.rootRealpath, 'unexpected'), 'private inventory detail');
       }],
-      ['manifest', 'manifest_rejected', (fixture) => writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), '{}')],
-      ['missing dependencies', 'manifest_rejected', (fixture) => {
+      ['legacy base-only manifest', 'protected_file_identity_rejected', (fixture) => {
         writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), JSON.stringify({
           name: 'apg-graph-genesis', version: '0.0.0', private: true,
         }));
@@ -840,7 +928,7 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
         writeValidPostState(fixture.workspace.rootRealpath);
         writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), '{');
       }],
-      ['config empty', 'config_empty_rejected', (fixture) => {
+      ['config bytes', 'protected_file_identity_rejected', (fixture) => {
         writeValidPostState(fixture.workspace.rootRealpath);
         writeFileSync(join(fixture.workspace.rootRealpath, 'user.npmrc'), 'private-config-value');
       }],
@@ -922,10 +1010,6 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     const processResult = await processPromise;
     await audit.record('listener_drained', { acceptedHandlerCount: 1 });
     const lock = exactTargetLock();
-    writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), JSON.stringify({
-      name: 'apg-graph-genesis', version: '0.0.0', private: true,
-      dependencies: { '@modelcontextprotocol/server-filesystem': '2026.7.10' },
-    }));
     writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(lock));
     await audit.record('lock_validation_started');
     const candidates = new ExactGraphCandidateAuthority();
@@ -1272,10 +1356,6 @@ function exactTargetLock() {
 }
 
 function writeValidPostState(root: string): void {
-  writeFileSync(join(root, 'package.json'), JSON.stringify({
-    name: 'apg-graph-genesis', version: '0.0.0', private: true,
-    dependencies: { '@modelcontextprotocol/server-filesystem': '2026.7.10' },
-  }));
   writeFileSync(join(root, 'package-lock.json'), JSON.stringify(exactTargetLock()));
 }
 

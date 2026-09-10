@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:net';
@@ -22,6 +22,7 @@ import {
   GraphGenesisWorkspaceAuthority,
   RuntimeTreeSnapshotAuthority,
   REQUIRED_COMPLETE_EVENTS,
+  CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES,
   SyntheticGraphGenesisApprovalAuthority,
   SyntheticGraphGenesisAuditAuthority,
   buildGraphGenesisLaunch,
@@ -42,6 +43,14 @@ afterEach(() => {
 describe('bounded metadata-only graph genesis network-free foundation', () => {
   it('binds exact snapshots, containment, workspace, launch, plan and one-time approval', async () => {
     const fixture = await genesisFixture();
+    const manifestDescriptor = fixture.workspace.protectedFiles.find((file) => file.name === 'package.json');
+    expect(readFileSync(join(fixture.workspace.rootRealpath, 'package.json'), 'utf8'))
+      .toBe(CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES);
+    expect(manifestDescriptor).toMatchObject({
+      mode: 0o600,
+      size: Buffer.byteLength(CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES),
+      sha256: createHash('sha256').update(CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES).digest('hex'),
+    });
     expect(fixture.plan).toMatchObject({
       targetName: TARGET,
       exactTargetVersion: VERSION,
@@ -229,10 +238,6 @@ describe('bounded metadata-only graph genesis network-free foundation', () => {
     await expect(authority.capture(root)).rejects.toMatchObject({ code: 'artifact_plan_invalid' });
 
     const fixture = await genesisFixture();
-    writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), JSON.stringify({
-      name: 'apg-graph-genesis', version: '0.0.0', private: true,
-      dependencies: { [TARGET]: VERSION },
-    }));
     writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(lockFixture()));
     mkdirSync(join(fixture.workspace.rootRealpath, 'node_modules'));
     await expect(fixture.workspaceAuthority.validateSyntheticPostState(fixture.workspace, lockFixture()))
@@ -258,10 +263,6 @@ describe('bounded metadata-only graph genesis network-free foundation', () => {
     }, transport(() => packument(TARGET)));
     const ledger = broker.disarmComplete(session);
     const lock = lockFixture();
-    writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), JSON.stringify({
-      name: 'apg-graph-genesis', version: '0.0.0', private: true,
-      dependencies: { [TARGET]: VERSION },
-    }));
     writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(lock));
     await fixture.workspaceAuthority.validateSyntheticPostState(fixture.workspace, lock);
     const candidates = new ExactGraphCandidateAuthority();

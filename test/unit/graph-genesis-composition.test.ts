@@ -657,10 +657,6 @@ function candidateInput() {
 }
 
 function writeExpectedPostState(root: string): void {
-  writeFileSync(join(root, 'package.json'), JSON.stringify({
-    name: 'apg-graph-genesis', version: '0.0.0', private: true,
-    dependencies: { '@modelcontextprotocol/server-filesystem': '2026.7.10' },
-  }));
   writeFileSync(join(root, 'package-lock.json'), JSON.stringify(candidateInput().packageLock));
 }
 

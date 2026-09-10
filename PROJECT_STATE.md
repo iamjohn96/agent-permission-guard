@@ -45,6 +45,14 @@ exact post-state manifest requirement and makes npm's production save type expli
 execution capsule and Dashboard envelope, so prior approvals cannot be reused. It changes no broker/containment/
 cleanup/terminal semantics or audit/receipt/DB schema and does not establish a live success. See
 `docs/graph-genesis-v10-save-prod-architecture-check.md`.
+The approved v11 network-free checkpoint replaces the base-only initial workspace manifest with one shared,
+canonical exact dependency declaration written exclusively at mode `0600` by both Graph Genesis initializers. Its
+protected-file descriptors bind inode, mode, size and content digest into the workspace binding, containment
+evidence, plan, capsule and Dashboard envelope; pre-spawn and post-state drift checks reject replacement,
+in-place mutation and same-semantic byte rewrites. The fixed `--save-prod`/four-socket launch, exact post-state,
+broker limits, no-queue/no-retry, cleanup and terminal semantics remain unchanged. It changes neither audit,
+receipt nor DB schema, dependencies, approval logic or parsing, and does not establish a live success. See
+`docs/graph-genesis-v11-predeclared-manifest-architecture-check.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,

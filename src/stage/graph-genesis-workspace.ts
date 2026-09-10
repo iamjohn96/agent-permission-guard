@@ -11,7 +11,10 @@ import type {
   HardenedGraphGenesisPlan,
   HardenedGraphGenesisPlanAuthority,
 } from './graph-genesis-hardening.js';
-import type { GraphGenesisWorkspace } from './graph-genesis.js';
+import {
+  CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST,
+  type GraphGenesisWorkspace,
+} from './graph-genesis.js';
 import { PACKAGE_STAGE_HARD_CEILINGS, PackageStageError } from './profile.js';
 
 const TARGET = '@modelcontextprotocol/server-filesystem';
@@ -90,26 +93,22 @@ export class HardenedGraphGenesisPostStateAuthority {
     if (!root.isDirectory() || root.isSymbolicLink() || root.dev !== input.workspace.device
       || root.ino !== input.workspace.inode || root.uid !== input.workspace.owner
       || (root.mode & 0o777) !== input.workspace.mode) this.#fail('workspace_identity_rejected');
-    for (const expected of input.workspace.protectedFiles) {
-      const info = await this.#stage('protected_file_identity_rejected',
-        () => lstat(join(input.workspace.rootRealpath, expected.name)));
-      if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.dev !== expected.device
-        || info.ino !== expected.inode || (info.mode & 0o777) !== expected.mode) this.#fail('protected_file_identity_rejected');
-    }
+    await this.#stage('protected_file_identity_rejected',
+      () => this.workspaces.revalidateProtectedFiles(input.workspace));
     const inventory = await this.#stage('inventory_rejected', () => inspectTree(input.workspace.rootRealpath, input.plan));
     const manifest = await this.#stage('manifest_rejected',
       () => readDocument(join(input.workspace.rootRealpath, 'package.json'), input.plan.limits.packageJsonBytes));
-    const wanted = {
-      name: 'apg-graph-genesis', version: '0.0.0', private: true,
-      dependencies: { [TARGET]: VERSION },
-    };
-    if (canonicalJson(manifest.document) !== canonicalJson(wanted)) this.#fail('manifest_rejected');
+    if (canonicalJson(manifest.document) !== canonicalJson(CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST)) {
+      this.#fail('manifest_rejected');
+    }
     const lock = await this.#stage('lock_document_rejected',
       () => readDocument(join(input.workspace.rootRealpath, 'package-lock.json'), input.plan.limits.packageLockBytes));
     for (const config of ['user.npmrc', 'global.npmrc']) {
       const info = await this.#stage('config_empty_rejected', () => lstat(join(input.workspace.rootRealpath, config)));
       if (info.size !== 0) this.#fail('config_empty_rejected');
     }
+    await this.#stage('protected_file_identity_rejected',
+      () => this.workspaces.revalidateProtectedFiles(input.workspace));
     const lockDocument = deepFreeze(lock.document);
     const lockDocumentDigest = sha256(canonicalJson(lockDocument));
     const unsigned = Object.freeze({

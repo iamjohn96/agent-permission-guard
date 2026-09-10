@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { constants } from 'node:fs';
 import { lstat, mkdir, open, opendir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -9,9 +10,14 @@ import type {
   AuthenticatedRuntimeTreeSnapshot,
   GraphGenesisLaunch,
   GraphGenesisLimits,
+  GraphGenesisProtectedFile,
   GraphGenesisWorkspace,
 } from './graph-genesis.js';
-import { RuntimeTreeSnapshotAuthority, buildGraphGenesisLaunch } from './graph-genesis.js';
+import {
+  CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES,
+  RuntimeTreeSnapshotAuthority,
+  buildGraphGenesisLaunch,
+} from './graph-genesis.js';
 import { validateMetadataBrokerLimits } from './graph-genesis-broker.js';
 import type { SeatbeltLoopbackProfile, SeatbeltSelfTestObservations } from './graph-genesis-containment.js';
 import { PackageStageError } from './profile.js';
@@ -270,19 +276,16 @@ export class FinalizedGraphGenesisWorkspaceAuthority {
     const rootInfo = await stat(rootRealpath);
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || (rootInfo.mode & 0o777) !== 0o700) failPlan();
     for (const directory of ['cache', 'logs', 'tmp', 'prefix']) await mkdir(join(rootRealpath, directory), { mode: 0o700 });
-    await exclusiveFile(join(rootRealpath, 'package.json'), `${canonicalJson({
-      name: 'apg-graph-genesis', version: '0.0.0', private: true,
-    })}\n`);
+    await exclusiveFile(join(rootRealpath, 'package.json'), CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES);
     await exclusiveFile(join(rootRealpath, 'user.npmrc'), '');
     await exclusiveFile(join(rootRealpath, 'global.npmrc'), '');
     await exclusiveFile(join(rootRealpath, 'broker-profile.sb'), profileText);
-    const protectedFiles = Object.freeze(await Promise.all(
-      ['package.json', 'user.npmrc', 'global.npmrc', 'broker-profile.sb'].map(async (name) => {
-        const info = await lstat(join(rootRealpath, name));
-        if (!info.isFile() || info.nlink !== 1 || (info.mode & 0o777) !== 0o600) failPlan();
-        return Object.freeze({ name, device: info.dev, inode: info.ino, mode: 0o600 as const });
-      }),
-    ));
+    const protectedFiles = Object.freeze(await Promise.all([
+      captureProtectedFile(rootRealpath, 'package.json', CANONICAL_EXACT_GRAPH_GENESIS_MANIFEST_BYTES),
+      captureProtectedFile(rootRealpath, 'user.npmrc', ''),
+      captureProtectedFile(rootRealpath, 'global.npmrc', ''),
+      captureProtectedFile(rootRealpath, 'broker-profile.sb', profileText),
+    ]));
     const initial = await this.trees.capture(rootRealpath);
     const workspace = deepFreeze({
       workspaceVersion: 1 as const,
@@ -307,13 +310,16 @@ export class FinalizedGraphGenesisWorkspaceAuthority {
     const root = await lstat(workspace.rootRealpath);
     if (!root.isDirectory() || root.isSymbolicLink() || root.dev !== workspace.device || root.ino !== workspace.inode
       || root.uid !== workspace.owner || (root.mode & 0o777) !== workspace.mode) failPlan();
-    for (const expected of workspace.protectedFiles) {
-      const info = await lstat(join(workspace.rootRealpath, expected.name));
-      if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.dev !== expected.device
-        || info.ino !== expected.inode || (info.mode & 0o777) !== expected.mode) failPlan();
-    }
+    await this.revalidateProtectedFiles(workspace);
     const current = await this.trees.capture(workspace.rootRealpath);
     if (current.treeDigest !== workspace.initialManifestDigest) failPlan();
+  }
+
+  async revalidateProtectedFiles(workspace: GraphGenesisWorkspace): Promise<void> {
+    if (!this.authenticates(workspace)) failPlan();
+    for (const expected of workspace.protectedFiles) {
+      await revalidateProtectedFile(workspace.rootRealpath, expected);
+    }
   }
 }
 
@@ -922,6 +928,68 @@ async function exclusiveFile(path: string, content: string): Promise<void> {
   const file = await open(path, 'wx', 0o600);
   try { await file.writeFile(content, 'utf8'); await file.sync(); } finally { await file.close(); }
 }
+
+async function captureProtectedFile(
+  root: string,
+  name: string,
+  expectedContent: string,
+): Promise<GraphGenesisProtectedFile> {
+  const path = join(root, name);
+  const expectedBytes = Buffer.from(expectedContent, 'utf8');
+  if (expectedBytes.byteLength > 64 * 1024) failPlan();
+  const linked = await lstat(path);
+  if (!linked.isFile() || linked.isSymbolicLink() || linked.nlink !== 1 || (linked.mode & 0o777) !== 0o600) failPlan();
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await file.stat();
+    if (!sameProtectedIdentity(linked, before) || before.size !== expectedBytes.byteLength) failPlan();
+    const bytes = await file.readFile();
+    const after = await file.stat();
+    if (!sameProtectedIdentity(before, after) || before.size !== after.size || !bytes.equals(expectedBytes)) failPlan();
+    const current = await lstat(path);
+    if (!sameProtectedIdentity(before, current) || current.size !== before.size) failPlan();
+    return Object.freeze({
+      name,
+      device: before.dev,
+      inode: before.ino,
+      mode: 0o600 as const,
+      size: before.size,
+      sha256: sha256(bytes),
+    });
+  } finally { await file.close(); }
+}
+
+async function revalidateProtectedFile(root: string, expected: GraphGenesisProtectedFile): Promise<void> {
+  const path = join(root, expected.name);
+  const linked = await lstat(path);
+  if (!matchesProtectedFile(linked, expected)) failPlan();
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await file.stat();
+    if (!matchesProtectedFile(before, expected) || !sameProtectedIdentity(linked, before)) failPlan();
+    const bytes = await file.readFile();
+    const after = await file.stat();
+    if (!matchesProtectedFile(after, expected) || !sameProtectedIdentity(before, after)
+      || sha256(bytes) !== expected.sha256) failPlan();
+    const current = await lstat(path);
+    if (!matchesProtectedFile(current, expected) || !sameProtectedIdentity(after, current)) failPlan();
+  } finally { await file.close(); }
+}
+
+function matchesProtectedFile(info: Awaited<ReturnType<typeof lstat>>, expected: GraphGenesisProtectedFile): boolean {
+  return info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && info.dev === expected.device
+    && info.ino === expected.inode && unixMode(info.mode) === expected.mode && info.size === expected.size;
+}
+
+function sameProtectedIdentity(
+  left: Awaited<ReturnType<typeof lstat>>,
+  right: Awaited<ReturnType<typeof lstat>>,
+): boolean {
+  return left.isFile() && right.isFile() && left.nlink === 1 && right.nlink === 1
+    && left.dev === right.dev && left.ino === right.ino && unixMode(left.mode) === unixMode(right.mode);
+}
+
+function unixMode(value: number | bigint): number { return Number(value) & 0o777; }
 
 export function computeWorkspaceBinding(workspace: GraphGenesisWorkspace): string {
   return sha256(canonicalJson({
