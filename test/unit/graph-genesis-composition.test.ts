@@ -93,8 +93,22 @@ describe('production Graph Genesis approval and execution composition foundation
         args: legacyLaunch.args.filter((argument) => argument !== '--maxsockets=4'),
       });
       expect(legacyLaunchDigest).not.toBe(launchDigest);
+      const noSaveProdLaunchDigest = graphGenesisDigest({
+        ...legacyLaunch,
+        args: legacyLaunch.args.filter((argument) => argument !== '--save-prod'),
+      });
+      const changedSaveProdLaunchDigest = graphGenesisDigest({
+        ...legacyLaunch,
+        args: legacyLaunch.args.map((argument) => argument === '--save-prod' ? '--save-dev' : argument),
+      });
+      expect(noSaveProdLaunchDigest).not.toBe(launchDigest);
+      expect(changedSaveProdLaunchDigest).not.toBe(launchDigest);
       const { executionEnvelopeHash, ...unsignedEnvelope } = prepared.envelope;
       expect(graphGenesisDigest({ ...unsignedEnvelope, launchDigest: legacyLaunchDigest }))
+        .not.toBe(executionEnvelopeHash);
+      expect(graphGenesisDigest({ ...unsignedEnvelope, launchDigest: noSaveProdLaunchDigest }))
+        .not.toBe(executionEnvelopeHash);
+      expect(graphGenesisDigest({ ...unsignedEnvelope, launchDigest: changedSaveProdLaunchDigest }))
         .not.toBe(executionEnvelopeHash);
       await expect(executionAudit.record('runtime_snapshot_complete', {
         runtimeManifestDigest: '0'.repeat(64),

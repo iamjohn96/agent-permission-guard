@@ -207,7 +207,7 @@ The live owner reconstructs and validates the existing fixed launch vector:
 --allow-fs-write=<owned-workspace>
 <exact-npm-11.16.0-cli>
 install @modelcontextprotocol/server-filesystem@2026.7.10
---package-lock-only --save-exact --maxsockets=4 --ignore-scripts
+--package-lock-only --save-exact --save-prod --maxsockets=4 --ignore-scripts
 --audit=false --fund=false --update-notifier=false --workspaces=false --bin-links=false
 --allow-directory=none --allow-file=none --allow-git=none --allow-remote=none
 --replace-registry-host=never

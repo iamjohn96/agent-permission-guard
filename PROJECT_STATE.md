@@ -38,6 +38,13 @@ It does not establish the exact post-state predicate or a successful action. The
 corrects the validated-metadata terminal mismatch and adds authority-owned, bounded local post-state predicates;
 it leaves the audit/receipt schema, broker limits, fixed npm arguments, no-queue/no-retry behavior and all v1-v7
 evidence untouched. See `docs/graph-genesis-v7-terminal-post-state-checkpoint.md`.
+The approved v9 bounded manifest classification later found exact base fields but an absent/invalid dependencies
+container and target spec, without exposing the quarantined file. The current v10 network-free checkpoint keeps the
+exact post-state manifest requirement and makes npm's production save type explicit with fixed
+`--save-prod` after `--save-exact` and before `--maxsockets=4`. The resulting launch digest changes the plan,
+execution capsule and Dashboard envelope, so prior approvals cannot be reused. It changes no broker/containment/
+cleanup/terminal semantics or audit/receipt/DB schema and does not establish a live success. See
+`docs/graph-genesis-v10-save-prod-architecture-check.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,

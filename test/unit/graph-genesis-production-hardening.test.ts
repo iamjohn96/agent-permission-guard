@@ -88,18 +88,26 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
       .toThrowError(expect.objectContaining({ code: 'artifact_plan_invalid' }));
   });
 
-  it('binds the fixed four-socket launch to the plan and rejects missing, changed, or duplicate variants', async () => {
+  it('binds fixed save-prod and four-socket launch semantics to the plan and rejects altered variants', async () => {
     const fixture = await planFixture();
     const launch = fixture.prepareInput.launch;
+    expect(launch.args.filter((argument) => argument === '--save-prod')).toHaveLength(1);
     expect(launch.args.filter((argument) => argument === '--maxsockets=4')).toHaveLength(1);
     expect(fixture.prepared.plan.limits.broker).toEqual(limits().broker);
     const liveOwner = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live.ts'), 'utf8');
     expect(liveOwner).toContain('uniquePackageNames: 128, totalRequests: 256, concurrentRequests: 4');
     expect(liveOwner).toContain('responseBytes: 4 * MiB, aggregateResponseBytes: 64 * MiB, requestTimeoutMs: 10_000');
+    const saveProdRemoved = launch.args.filter((argument) => argument !== '--save-prod');
+    const saveProdMoved = [...saveProdRemoved];
+    saveProdMoved.splice(saveProdMoved.indexOf('--maxsockets=4') + 1, 0, '--save-prod');
     const variants = [
       launch.args.filter((argument) => argument !== '--maxsockets=4'),
       launch.args.map((argument) => argument === '--maxsockets=4' ? '--maxsockets=8' : argument),
       [...launch.args, '--maxsockets=4'],
+      saveProdRemoved,
+      launch.args.map((argument) => argument === '--save-prod' ? '--save-dev' : argument),
+      [...launch.args, '--save-prod'],
+      saveProdMoved,
     ];
     for (const args of variants) {
       expect(() => fixture.planAuthority.prepare({
@@ -822,6 +830,12 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
         writeFileSync(join(fixture.workspace.rootRealpath, 'unexpected'), 'private inventory detail');
       }],
       ['manifest', 'manifest_rejected', (fixture) => writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), '{}')],
+      ['missing dependencies', 'manifest_rejected', (fixture) => {
+        writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), JSON.stringify({
+          name: 'apg-graph-genesis', version: '0.0.0', private: true,
+        }));
+        writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(exactTargetLock()));
+      }],
       ['lock document', 'lock_document_rejected', (fixture) => {
         writeValidPostState(fixture.workspace.rootRealpath);
         writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), '{');
