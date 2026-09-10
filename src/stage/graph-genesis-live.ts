@@ -43,7 +43,11 @@ import {
   computeWorkspaceBinding,
   type HardenedGraphGenesisPlan,
 } from './graph-genesis-hardening.js';
-import { classifyGraphGenesisFailure, GraphGenesisLivePhaseAuthority } from './graph-genesis-live-state.js';
+import {
+  classifyGraphGenesisFailure,
+  GraphGenesisLivePhaseAuthority,
+  selectGraphGenesisFailureTerminalStatus,
+} from './graph-genesis-live-state.js';
 import { emitGraphGenesisDiagnostic } from './graph-genesis-diagnostics.js';
 import {
   BoundedNpmPublicMetadataTransport,
@@ -436,6 +440,7 @@ export async function runExactProductionGraphGenesisLive(
         rejectedBrokerFailure = true;
       }
     }
+    const postStateFailure = postStates?.claimFailure(error);
     const metadata = executionAudit?.metadataSummary();
     const externalRead = metadata !== undefined && metadata.externalReadStatus !== 'not_started';
     const quarantineReferenceDigest = root === undefined
@@ -476,7 +481,10 @@ export async function runExactProductionGraphGenesisLive(
               ? { quarantineReferenceDigest } : {}),
           },
           terminalAudit: { status: 'failed' }, errorCode: brokerFailure?.causeCode ?? safeErrorCode(error),
-        }, externalRead ? 'incomplete_external_read' : controller.signal.aborted ? 'cancelled' : 'execution_error');
+        }, selectGraphGenesisFailureTerminalStatus({
+          externalReadStatus: metadata?.externalReadStatus ?? 'not_started',
+          cancelled: controller.signal.aborted,
+        }));
       } catch { terminalUnknown = true; }
     } else if (!auditPersistenceFailure && !terminalCommitAttempted && audit !== undefined) {
       failureTerminalAttempted = true;
@@ -486,6 +494,11 @@ export async function runExactProductionGraphGenesisLive(
       && executionAudit?.events.includes('npm_terminal_observed') === true
       && executionAudit.events.includes('listener_drained') === true) {
       emitGraphGenesisDiagnostic(brokerFailure, (line) => writeSync(2, line, null, 'utf8'));
+    }
+    if (postStateFailure !== undefined && failureTerminalAttempted
+      && executionAudit?.events.includes('npm_terminal_observed') === true
+      && executionAudit.events.includes('listener_drained') === true) {
+      postStates?.emitFailureDiagnostic(postStateFailure, (line) => writeSync(2, line, null, 'utf8'));
     }
     try { auditSource?.database.close(); } catch { terminalUnknown = true; }
     auditSource = undefined;

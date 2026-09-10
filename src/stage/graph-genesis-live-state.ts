@@ -23,6 +23,21 @@ export const GRAPH_GENESIS_LIVE_PHASES = Object.freeze([
 
 export type GraphGenesisLivePhase = typeof GRAPH_GENESIS_LIVE_PHASES[number];
 
+export type GraphGenesisMetadataExternalReadStatus = 'not_started' | 'incomplete' | 'validated';
+
+/**
+ * Selects the receipt terminal without conflating a completed metadata phase with
+ * an incomplete metadata read. The live owner separately retains the broader
+ * external-read flag for conservative cleanup and result classification.
+ */
+export function selectGraphGenesisFailureTerminalStatus(input: Readonly<{
+  externalReadStatus: GraphGenesisMetadataExternalReadStatus;
+  cancelled: boolean;
+}>): 'incomplete_external_read' | 'cancelled' | 'execution_error' {
+  if (input.externalReadStatus === 'incomplete') return 'incomplete_external_read';
+  return input.cancelled ? 'cancelled' : 'execution_error';
+}
+
 /**
  * Pure terminal classification shared by the live owner and network-free tests.
  * Quarantine and uncertain terminal durability always take precedence over a cancellation.

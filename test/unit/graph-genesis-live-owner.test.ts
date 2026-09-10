@@ -12,6 +12,7 @@ import {
   GRAPH_GENESIS_LIVE_PHASES,
   classifyGraphGenesisFailure,
   GraphGenesisLivePhaseAuthority,
+  selectGraphGenesisFailureTerminalStatus,
   SyntheticGraphGenesisFullFlowTwin,
   type GraphGenesisLivePhase,
   type SyntheticGraphGenesisFullFlowAdapter,
@@ -92,6 +93,17 @@ describe('Exact Production Graph Genesis owner boundary', () => {
       .toMatchObject({ status: 'outcome_unknown', exitCode: 6 });
   });
 
+  it.each([
+    ['incomplete metadata takes precedence over cancellation', 'incomplete', true, 'incomplete_external_read'],
+    ['incomplete metadata without cancellation', 'incomplete', false, 'incomplete_external_read'],
+    ['validated metadata and cancellation', 'validated', true, 'cancelled'],
+    ['validated metadata and downstream failure', 'validated', false, 'execution_error'],
+    ['no metadata and cancellation', 'not_started', true, 'cancelled'],
+    ['no metadata and downstream failure', 'not_started', false, 'execution_error'],
+  ] as const)('selects the exact Graph terminal for %s', (_name, externalReadStatus, cancelled, expected) => {
+    expect(selectGraphGenesisFailureTerminalStatus({ externalReadStatus, cancelled })).toBe(expected);
+  });
+
   it('keeps the synthetic twin free of production network and spawn capabilities', () => {
     const source = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live-state.ts'), 'utf8');
     expect(source).not.toMatch(/node:dns|node:https|node:child_process|SystemRegistryAddressResolver|NodePinnedHttpsClient|NodeGraphGenesisSpawnAdapter/);
@@ -137,6 +149,8 @@ describe('Exact Production Graph Genesis owner boundary', () => {
     expect(source).toContain('broker.authenticatesFailure(claimedBrokerFailure)');
     expect(source).toContain('errorCode: brokerFailure?.causeCode ?? safeErrorCode(error)');
     expect(source).toContain("const auditPersistenceFailure = safeErrorCode(error) === 'stage_audit_incomplete';");
+    expect(source).toContain('selectGraphGenesisFailureTerminalStatus({');
+    expect(source).not.toContain("externalRead ? 'incomplete_external_read' : controller.signal.aborted ? 'cancelled' : 'execution_error'");
   });
 
   it('emits one bounded redacted diagnostic only through the owner failure path', () => {
@@ -160,8 +174,11 @@ describe('Exact Production Graph Genesis owner boundary', () => {
     const source = readFileSync(join(process.cwd(), 'src/stage/graph-genesis-live.ts'), 'utf8');
     const terminalAttempt = source.indexOf('failureTerminalAttempted = true;');
     const diagnostic = source.indexOf('emitGraphGenesisDiagnostic(brokerFailure');
+    const postStateDiagnostic = source.indexOf('postStates?.emitFailureDiagnostic(postStateFailure');
     expect(terminalAttempt).toBeGreaterThan(-1);
     expect(diagnostic).toBeGreaterThan(terminalAttempt);
+    expect(postStateDiagnostic).toBeGreaterThan(terminalAttempt);
+    expect(postStateDiagnostic).toBeGreaterThan(source.indexOf("executionAudit.events.includes('listener_drained')", terminalAttempt));
   });
 
   it.runIf(existsSync(join(process.cwd(), 'dist/src/stage/graph-genesis-diagnostics.js')))(

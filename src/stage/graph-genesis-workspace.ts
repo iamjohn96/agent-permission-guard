@@ -20,6 +20,8 @@ const ALLOWED_TOP = new Set([
   'package.json', 'package-lock.json', 'user.npmrc', 'global.npmrc', 'broker-profile.sb',
   'cache', 'logs', 'tmp', 'prefix',
 ]);
+const POST_STATE_DIAGNOSTIC_PREFIX = '[apg] graph-genesis-post-state-diagnostic ';
+const MAX_POST_STATE_DIAGNOSTIC_BYTES = 1024;
 
 export type AuthenticatedHardenedGraphGenesisPostState = Readonly<{
   evidenceVersion: 1;
@@ -35,6 +37,23 @@ export type AuthenticatedHardenedGraphGenesisPostState = Readonly<{
   evidenceDigest: string;
 }>;
 
+export type GraphGenesisPostStateFailurePredicate =
+  | 'authority_binding_rejected'
+  | 'workspace_identity_rejected'
+  | 'protected_file_identity_rejected'
+  | 'inventory_rejected'
+  | 'manifest_rejected'
+  | 'lock_document_rejected'
+  | 'config_empty_rejected';
+
+/** Fixed, non-sensitive diagnostic evidence. Authenticity is authority-local. */
+export type AuthenticatedHardenedGraphGenesisPostStateFailure = Readonly<{
+  diagnosticVersion: 1;
+  predicate: GraphGenesisPostStateFailurePredicate;
+}>;
+
+type DiagnosticWriter = (line: string) => unknown;
+
 type PrivatePostStateCapsule = Readonly<{
   capsuleVersion: 1;
   planHash: string;
@@ -46,6 +65,10 @@ export class HardenedGraphGenesisPostStateAuthority {
   readonly #authenticated = new WeakSet<object>();
   readonly #capsules = new WeakSet<object>();
   readonly #pairs = new WeakMap<object, object>();
+  readonly #failures = new WeakSet<object>();
+  readonly #errors = new WeakMap<object, AuthenticatedHardenedGraphGenesisPostStateFailure>();
+  readonly #claimedErrors = new WeakSet<object>();
+  readonly #diagnosticsAttempted = new WeakSet<object>();
 
   constructor(
     private readonly plans: HardenedGraphGenesisPlanAuthority,
@@ -62,27 +85,30 @@ export class HardenedGraphGenesisPostStateAuthority {
   }>> {
     if (!this.plans.authenticatesPair(input.plan, input.executionCapsule)
       || !this.workspaces.authenticates(input.workspace)
-      || input.plan.workspaceBinding !== workspaceBinding(input.workspace)) failPostState();
-    const root = await lstat(input.workspace.rootRealpath);
+      || input.plan.workspaceBinding !== workspaceBinding(input.workspace)) this.#fail('authority_binding_rejected');
+    const root = await this.#stage('workspace_identity_rejected', () => lstat(input.workspace.rootRealpath));
     if (!root.isDirectory() || root.isSymbolicLink() || root.dev !== input.workspace.device
       || root.ino !== input.workspace.inode || root.uid !== input.workspace.owner
-      || (root.mode & 0o777) !== input.workspace.mode) failPostState();
+      || (root.mode & 0o777) !== input.workspace.mode) this.#fail('workspace_identity_rejected');
     for (const expected of input.workspace.protectedFiles) {
-      const info = await lstat(join(input.workspace.rootRealpath, expected.name));
+      const info = await this.#stage('protected_file_identity_rejected',
+        () => lstat(join(input.workspace.rootRealpath, expected.name)));
       if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.dev !== expected.device
-        || info.ino !== expected.inode || (info.mode & 0o777) !== expected.mode) failPostState();
+        || info.ino !== expected.inode || (info.mode & 0o777) !== expected.mode) this.#fail('protected_file_identity_rejected');
     }
-    const inventory = await inspectTree(input.workspace.rootRealpath, input.plan);
-    const manifest = await readDocument(join(input.workspace.rootRealpath, 'package.json'), input.plan.limits.packageJsonBytes);
+    const inventory = await this.#stage('inventory_rejected', () => inspectTree(input.workspace.rootRealpath, input.plan));
+    const manifest = await this.#stage('manifest_rejected',
+      () => readDocument(join(input.workspace.rootRealpath, 'package.json'), input.plan.limits.packageJsonBytes));
     const wanted = {
       name: 'apg-graph-genesis', version: '0.0.0', private: true,
       dependencies: { [TARGET]: VERSION },
     };
-    if (canonicalJson(manifest.document) !== canonicalJson(wanted)) failPostState();
-    const lock = await readDocument(join(input.workspace.rootRealpath, 'package-lock.json'), input.plan.limits.packageLockBytes);
+    if (canonicalJson(manifest.document) !== canonicalJson(wanted)) this.#fail('manifest_rejected');
+    const lock = await this.#stage('lock_document_rejected',
+      () => readDocument(join(input.workspace.rootRealpath, 'package-lock.json'), input.plan.limits.packageLockBytes));
     for (const config of ['user.npmrc', 'global.npmrc']) {
-      const info = await lstat(join(input.workspace.rootRealpath, config));
-      if (info.size !== 0) failPostState();
+      const info = await this.#stage('config_empty_rejected', () => lstat(join(input.workspace.rootRealpath, config)));
+      if (info.size !== 0) this.#fail('config_empty_rejected');
     }
     const lockDocument = deepFreeze(lock.document);
     const lockDocumentDigest = sha256(canonicalJson(lockDocument));
@@ -118,9 +144,59 @@ export class HardenedGraphGenesisPostStateAuthority {
     return typeof evidence === 'object' && evidence !== null && this.#authenticated.has(evidence);
   }
 
+  /** Returns a failure once only when this exact authority issued the thrown error. */
+  claimFailure(error: unknown): AuthenticatedHardenedGraphGenesisPostStateFailure | undefined {
+    if (typeof error !== 'object' || error === null || this.#claimedErrors.has(error)) return undefined;
+    const failure = this.#errors.get(error);
+    if (failure === undefined) return undefined;
+    this.#claimedErrors.add(error);
+    return failure;
+  }
+
+  authenticatesFailure(value: unknown): value is AuthenticatedHardenedGraphGenesisPostStateFailure {
+    return typeof value === 'object' && value !== null && this.#failures.has(value);
+  }
+
+  /** One local best-effort projection per authenticated failure; write errors are inert. */
+  emitFailureDiagnostic(failure: AuthenticatedHardenedGraphGenesisPostStateFailure, write: DiagnosticWriter): boolean {
+    if (!this.authenticatesFailure(failure) || this.#diagnosticsAttempted.has(failure)) return false;
+    this.#diagnosticsAttempted.add(failure);
+    const line = `${POST_STATE_DIAGNOSTIC_PREFIX}${canonicalJson({
+      diagnosticVersion: failure.diagnosticVersion,
+      predicate: failure.predicate,
+    })}\n`;
+    if (Buffer.byteLength(line, 'utf8') > MAX_POST_STATE_DIAGNOSTIC_BYTES) return false;
+    try {
+      write(line);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   packageLock(evidence: AuthenticatedHardenedGraphGenesisPostState, capsule: object): unknown {
     if (!this.authenticatesPair(evidence, capsule)) failPostState();
     return (capsule as PrivatePostStateCapsule).packageLock;
+  }
+
+  async #stage<T>(
+    predicate: GraphGenesisPostStateFailurePredicate,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && this.#errors.has(error)) throw error;
+      return this.#fail(predicate);
+    }
+  }
+
+  #fail(predicate: GraphGenesisPostStateFailurePredicate): never {
+    const failure = Object.freeze({ diagnosticVersion: 1 as const, predicate });
+    const error = new PackageStageError('acceptance_incomplete');
+    this.#failures.add(failure);
+    this.#errors.set(error, failure);
+    throw error;
   }
 }
 

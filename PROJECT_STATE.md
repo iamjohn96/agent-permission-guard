@@ -31,7 +31,13 @@ The follow-up approved network-free checkpoint fixes npm's per-origin connection
 identity while retaining the broker's four-request fail-closed cap, no queue and no retry. It requires a fresh
 review and acceptance; it does not reinterpret or reuse v1-v5 evidence. See also
 `docs/exact-production-graph-genesis-live-run-readiness-architecture-check.md` and
-`docs/graph-genesis-v5-maxsockets-architecture-check.md`.
+`docs/graph-genesis-v5-maxsockets-architecture-check.md`. The supplied v7 safe result reports npm exit 0, metadata
+126/126 validated, maximum active requests of four, 6,792,802 validated bytes and listener drain, but stops at
+`lock_validation_started` without candidate/Dashboard output and with a quarantined forwarding/no-terminal result.
+It does not establish the exact post-state predicate or a successful action. The current network-free checkpoint
+corrects the validated-metadata terminal mismatch and adds authority-owned, bounded local post-state predicates;
+it leaves the audit/receipt schema, broker limits, fixed npm arguments, no-queue/no-retry behavior and all v1-v7
+evidence untouched. See `docs/graph-genesis-v7-terminal-post-state-checkpoint.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,
@@ -331,7 +337,9 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 - APG verifies the captured runtime files and containment observations, not the complete OS, kernel, dynamic
   libraries or system trust store.
 - A post-spawn failure before authenticated post-state leaves the bounded private temporary root quarantined.
-  Automatic deletion is intentionally withheld; the audit/result carries only a reference digest.
+  Automatic deletion is intentionally withheld; the audit/result carries only a reference digest. v7 identifies
+  neither the exact post-state predicate nor a successful terminal outcome; the new local predicate projection is
+  diagnostic-only and cannot retroactively classify that action.
 - A successful Graph Genesis candidate is unsigned public graph evidence, not a production profile, staged
   package or MCP launch authority.
 - Exact identity currently covers the approved top-level package, not the complete transitive dependency graph.
@@ -504,6 +512,6 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Next Recommended Task
 
-Review the uncommitted pre-spawn cancellation correction, then seek separate commit/push approval. The
-non-injectable production owner and synthetic full-flow are committed at `592b286`; the one-time real
-acceptance remains a later exact command plus the user's live Dashboard decision.
+Review the uncommitted v7 terminal-classification and post-state diagnostic checkpoint, then seek separate
+commit/push approval. The non-injectable production owner and synthetic full-flow are committed at `592b286`; any
+live acceptance remains a later exact command plus the user's fresh Dashboard decision.

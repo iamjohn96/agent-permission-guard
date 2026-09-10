@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -812,6 +812,70 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     })).rejects.toMatchObject({ code: 'acceptance_incomplete' });
   });
 
+  it('issues one owner-authenticated, redacted first-failure predicate for every post-state inspection stage', async () => {
+    const cases: Array<readonly [string, string, (fixture: Awaited<ReturnType<typeof planFixture>>) => void, boolean?]> = [
+      ['authority/binding', 'authority_binding_rejected', () => undefined, true],
+      ['workspace identity', 'workspace_identity_rejected', (fixture) => chmodSync(fixture.workspace.rootRealpath, 0o755)],
+      ['protected-file identity', 'protected_file_identity_rejected', (fixture) => chmodSync(join(fixture.workspace.rootRealpath, 'package.json'), 0o644)],
+      ['inventory', 'inventory_rejected', (fixture) => {
+        writeValidPostState(fixture.workspace.rootRealpath);
+        writeFileSync(join(fixture.workspace.rootRealpath, 'unexpected'), 'private inventory detail');
+      }],
+      ['manifest', 'manifest_rejected', (fixture) => writeFileSync(join(fixture.workspace.rootRealpath, 'package.json'), '{}')],
+      ['lock document', 'lock_document_rejected', (fixture) => {
+        writeValidPostState(fixture.workspace.rootRealpath);
+        writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), '{');
+      }],
+      ['config empty', 'config_empty_rejected', (fixture) => {
+        writeValidPostState(fixture.workspace.rootRealpath);
+        writeFileSync(join(fixture.workspace.rootRealpath, 'user.npmrc'), 'private-config-value');
+      }],
+    ];
+    for (const [_name, predicate, mutate, forgeCapsule] of cases) {
+      const fixture = await planFixture();
+      mutate(fixture);
+      const postStates = new HardenedGraphGenesisPostStateAuthority(fixture.planAuthority, fixture.workspaceAuthority);
+      let thrown: unknown;
+      try {
+        await postStates.inspect({
+          plan: fixture.prepared.plan,
+          executionCapsule: forgeCapsule ? {} : fixture.prepared.capsule,
+          workspace: fixture.workspace,
+        });
+      } catch (error) { thrown = error; }
+      const failure = postStates.claimFailure(thrown);
+      expect(failure).toEqual({ diagnosticVersion: 1, predicate });
+      expect(postStates.claimFailure(thrown)).toBeUndefined();
+      expect(postStates.authenticatesFailure(failure)).toBe(true);
+      expect(postStates.authenticatesFailure({ ...failure! })).toBe(false);
+      expect(new HardenedGraphGenesisPostStateAuthority(fixture.planAuthority, fixture.workspaceAuthority)
+        .authenticatesFailure(failure)).toBe(false);
+      const lines: string[] = [];
+      expect(postStates.emitFailureDiagnostic(failure!, (line) => lines.push(line))).toBe(true);
+      expect(postStates.emitFailureDiagnostic(failure!, () => { throw new Error('broken stderr'); })).toBe(false);
+      expect(lines).toHaveLength(1);
+      expect(Buffer.byteLength(lines[0]!, 'utf8')).toBeLessThanOrEqual(1024);
+      expect(lines[0]).toContain(predicate);
+      expect(lines[0]).not.toContain(fixture.workspace.rootRealpath);
+      expect(lines[0]).not.toContain('private-config-value');
+      expect(lines[0]).not.toContain('private inventory detail');
+      expect(lines[0]).not.toMatch(/[0-9a-f]{64}/u);
+    }
+    const brokenFixture = await planFixture();
+    const brokenPostStates = new HardenedGraphGenesisPostStateAuthority(
+      brokenFixture.planAuthority, brokenFixture.workspaceAuthority,
+    );
+    let brokenThrown: unknown;
+    try {
+      await brokenPostStates.inspect({
+        plan: brokenFixture.prepared.plan, executionCapsule: {}, workspace: brokenFixture.workspace,
+      });
+    } catch (error) { brokenThrown = error; }
+    const brokenFailure = brokenPostStates.claimFailure(brokenThrown);
+    expect(brokenPostStates.emitFailureDiagnostic(brokenFailure!, () => { throw new Error('broken stderr'); })).toBe(false);
+    expect(brokenPostStates.emitFailureDiagnostic(brokenFailure!, () => undefined)).toBe(false);
+  });
+
   it('authenticates completion only after process, broker, candidate, cleanup and ordered audit all agree', async () => {
     const fixture = await planFixture();
     const leaseAuthority = new SyntheticGraphGenesisStartLeaseAuthority(fixture.planAuthority);
@@ -1191,6 +1255,14 @@ function exactTargetLock() {
       },
     },
   };
+}
+
+function writeValidPostState(root: string): void {
+  writeFileSync(join(root, 'package.json'), JSON.stringify({
+    name: 'apg-graph-genesis', version: '0.0.0', private: true,
+    dependencies: { '@modelcontextprotocol/server-filesystem': '2026.7.10' },
+  }));
+  writeFileSync(join(root, 'package-lock.json'), JSON.stringify(exactTargetLock()));
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {

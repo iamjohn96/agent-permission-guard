@@ -53,6 +53,49 @@ describe('portable unsigned receipt', () => {
     database.close();
   });
 
+  it('records a validated downstream failure atomically as execution_error and rejects the mismatched incomplete status', () => {
+    const database = openAuditDatabase(':memory:');
+    const recorder = new SqliteAuditRecorder(database);
+    const summary = {
+      metadata: { externalReadStatus: 'validated' as const, requestCount: 126, uniquePackageCount: 1, responseBytes: 6_792_802 },
+      process: { status: 'completed' as const, exitCode: 0, stdoutBytes: 0, stderrBytes: 0 },
+      cleanup: { status: 'quarantined' as const, quarantineReferenceDigest: `sha256:${'d'.repeat(64)}` },
+      terminalAudit: { status: 'failed' as const }, errorCode: 'acceptance_incomplete',
+    };
+    const call = recorder.begin(
+      { serverId: 'apg-graph-genesis', toolName: 'filesystem_metadata_graph', arguments: {} },
+      { ...receiptDecision('forward'), receipt: graphReceiptContext() },
+    );
+    call.markAuthorized();
+    call.markExecutionStarted();
+    call.finalizeGraphGenesisOutcome(summary, 'execution_error');
+    const terminalEvents = database.prepare(`
+      SELECT event_type FROM audit_events WHERE tool_call_id = ?
+      AND event_type IN ('graph_genesis_incomplete', 'execution_completed', 'outcome_receipt_finalized') ORDER BY sequence
+    `).all(call.actionId);
+    expect(terminalEvents).toEqual([
+      { event_type: 'graph_genesis_incomplete' },
+      { event_type: 'execution_completed' },
+      { event_type: 'outcome_receipt_finalized' },
+    ]);
+    expect(new PortableReceiptService(database, recorder).exportAction(call.actionId).outcome?.receipt.execution)
+      .toMatchObject({ terminalStatus: 'execution_error', observedResult: { externalReadStatus: 'validated' } });
+
+    const rejected = recorder.begin(
+      { serverId: 'apg-graph-genesis', toolName: 'filesystem_metadata_graph', arguments: {} },
+      { ...receiptDecision('forward'), receipt: graphReceiptContext() },
+    );
+    rejected.markAuthorized();
+    rejected.markExecutionStarted();
+    expect(() => rejected.finalizeGraphGenesisOutcome(summary, 'incomplete_external_read'))
+      .toThrow('Incomplete external read status lacks external-read evidence');
+    expect(database.prepare(`
+      SELECT event_type FROM audit_events WHERE tool_call_id = ?
+      AND event_type IN ('graph_genesis_incomplete', 'execution_completed', 'outcome_receipt_finalized')
+    `).all(rejected.actionId)).toEqual([]);
+    database.close();
+  });
+
   it('exports and independently verifies linked authorization and outcome evidence without sensitive output', () => {
     const database = openAuditDatabase(':memory:');
     const recorder = new SqliteAuditRecorder(database);
