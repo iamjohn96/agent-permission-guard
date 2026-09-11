@@ -215,7 +215,7 @@ install @modelcontextprotocol/server-filesystem@2026.7.10
 --cache=<owned-workspace>/cache
 --userconfig=<owned-empty-file>
 --globalconfig=<owned-empty-file>
---prefix=<owned-workspace>/prefix
+--prefix=<owned-workspace>
 --logs-dir=<owned-workspace>/logs
 --loglevel=warn
 ```
@@ -223,6 +223,9 @@ install @modelcontextprotocol/server-filesystem@2026.7.10
 The shell is disabled, stdin is closed, the child is a detached process group, and its environment is built
 only from `HOME`, `TMPDIR`, `LANG`, and `LC_ALL` pointing to or describing the owned workspace. No inherited
 `PATH`, npm config, proxy, auth, HOME, credential, or user/project configuration reaches the child.
+
+This example was updated to match current source, which now binds the prefix directly to the owned workspace
+root. The former nested `prefix/` example reflected earlier behavior.
 
 The exact child working directory is the owned temporary workspace, never the invocation directory. Capture
 stdout/stderr byte counts only and discard raw chunks after enforcing the 256 KiB ceilings. Raw child output

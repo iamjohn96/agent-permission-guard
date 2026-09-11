@@ -93,6 +93,19 @@ and diff check also passed. No real npm, Dashboard, DNS/HTTPS, live execution, p
 candidate/quarantine/evidence access, dependency change, commit or push occurred. See
 `docs/graph-genesis-candidate-package-role-private-subpredicate-architecture-check.md`.
 
+The v14 Graph Genesis Live Acceptance Architecture Check executed once on 2026-09-12 and produced
+a verified safe failure, not successful candidate acceptance. Dashboard approval was approved;
+the lock-only child exited 0, while the version-2 private compiler predicate was
+`package_peer_dependencies_rejected`, with public result `incomplete_external_read` (exit 4).
+New-v14-only read-only verification found 126 validated metadata responses across 117 packages,
+6,796,352 bytes, schemas `[1,2]`, a valid 275-event hash chain and receipt bindings, terminal
+order `graph_genesis_incomplete` → `execution_completed` → `outcome_receipt_finalized`, absent
+candidate/output events, and complete cleanup. The evidence supports existing no-installation and
+no-package-download claims without direct tarball/download/node_modules observation. No retry or
+prior evidence/quarantine access occurred. Next work is a network-free Exact Candidate Peer
+Dependency Semantics Architecture Check before source changes or v15. See
+`docs/graph-genesis-v14-live-acceptance-architecture-check.md`.
+
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,
 durable-before-visible local
