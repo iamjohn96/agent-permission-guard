@@ -65,6 +65,22 @@ passed 107/107. No npm, Dashboard, DNS/HTTPS, live execution, product DB, candid
 prior evidence, dependency, commit or push action occurred. See
 `docs/graph-genesis-exact-project-root-binding-architecture-check.md`.
 
+The current approved network-free Candidate Compiler Private Diagnostics checkpoint gives the
+exact lock compiler thirteen closed, authority-authenticated rejection predicates while preserving
+the public `graph_lock_invalid` error and all generic terminal behavior. Candidate authority and
+the hardened Graph Genesis compiler use private WeakMap/WeakSet provenance and one-time claims;
+the live owner may write one bounded redacted stderr line only after terminal handling and terminal
+observation/listener drain. It neither writes a candidate artifact on failure nor changes audit,
+receipt, DB schema, approval, broker, cleanup, dependencies or terminal semantics. Synthetic
+tests cover every predicate, copied/foreign error rejection, one-time projection and owner
+ordering. The synthetic boundary verifies candidate absence, omitted candidate evidence,
+post-state-bound cleanup and the unchanged pure classification; it does not claim a full production
+live terminal triple. The targeted local Vitest command passed 66/66 and the full local safe suite
+passed 330 tests with 3 conditional skips; `tsc -p tsconfig.json --noEmit` and `git diff --check`
+also passed. No real npm, Dashboard, DNS/HTTPS, live execution, product DB,
+candidate/evidence or quarantine access, dependency change, commit or push occurred. See
+`docs/graph-genesis-candidate-compiler-private-diagnostics-architecture-check.md`.
+
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,
 durable-before-visible local

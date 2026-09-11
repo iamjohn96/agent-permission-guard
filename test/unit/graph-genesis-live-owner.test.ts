@@ -175,10 +175,19 @@ describe('Exact Production Graph Genesis owner boundary', () => {
     const terminalAttempt = source.indexOf('failureTerminalAttempted = true;');
     const diagnostic = source.indexOf('emitGraphGenesisDiagnostic(brokerFailure');
     const postStateDiagnostic = source.indexOf('postStates?.emitFailureDiagnostic(postStateFailure');
+    const candidateFailureClaim = source.indexOf('const candidateFailure = candidateCompiler?.claimFailure(error);');
+    const candidateDiagnostic = source.indexOf('candidateCompiler?.emitFailureDiagnostic(candidateFailure');
     expect(terminalAttempt).toBeGreaterThan(-1);
     expect(diagnostic).toBeGreaterThan(terminalAttempt);
     expect(postStateDiagnostic).toBeGreaterThan(terminalAttempt);
     expect(postStateDiagnostic).toBeGreaterThan(source.indexOf("executionAudit.events.includes('listener_drained')", terminalAttempt));
+    expect(candidateFailureClaim).toBeGreaterThan(-1);
+    expect(candidateDiagnostic).toBeGreaterThan(postStateDiagnostic);
+    expect(candidateDiagnostic).toBeGreaterThan(terminalAttempt);
+    const candidateBlock = source.slice(candidateDiagnostic - 300, candidateDiagnostic + 200);
+    expect(candidateBlock).toContain('candidateFailure !== undefined && failureTerminalAttempted');
+    expect(candidateBlock).toContain("executionAudit?.events.includes('npm_terminal_observed') === true");
+    expect(candidateBlock).toContain("executionAudit.events.includes('listener_drained') === true");
   });
 
   it.runIf(existsSync(join(process.cwd(), 'dist/src/stage/graph-genesis-diagnostics.js')))(

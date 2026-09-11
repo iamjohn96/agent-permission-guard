@@ -4,7 +4,11 @@ import { join, relative, sep } from 'node:path';
 
 import { canonicalJson } from '../audit/canonical-json.js';
 import { ARCHIVE_WORKER_PROTOCOL_VERSION } from './archive-worker-protocol.js';
-import { ExactGraphCandidateAuthority, type ExactGraphCandidate } from './exact-production-graph.js';
+import {
+  ExactGraphCandidateAuthority,
+  type AuthenticatedExactGraphCandidateFailure,
+  type ExactGraphCandidate,
+} from './exact-production-graph.js';
 import { parseStrictJsonDocument } from './graph-genesis-broker.js';
 import type {
   FinalizedGraphGenesisWorkspaceAuthority,
@@ -25,6 +29,7 @@ const ALLOWED_TOP = new Set([
 ]);
 const POST_STATE_DIAGNOSTIC_PREFIX = '[apg] graph-genesis-post-state-diagnostic ';
 const MAX_POST_STATE_DIAGNOSTIC_BYTES = 1024;
+const CANDIDATE_DIAGNOSTIC_PREFIX = '[apg] graph-genesis-candidate-diagnostic ';
 
 export type AuthenticatedHardenedGraphGenesisPostState = Readonly<{
   evidenceVersion: 1;
@@ -201,6 +206,10 @@ export class HardenedGraphGenesisPostStateAuthority {
 
 export class HardenedGraphGenesisCandidateCompiler {
   readonly #pairs = new WeakMap<object, object>();
+  readonly #failures = new WeakSet<object>();
+  readonly #errors = new WeakMap<object, AuthenticatedExactGraphCandidateFailure>();
+  readonly #claimedErrors = new WeakSet<object>();
+  readonly #diagnosticsAttempted = new WeakSet<object>();
 
   constructor(
     private readonly postStates: HardenedGraphGenesisPostStateAuthority,
@@ -214,23 +223,34 @@ export class HardenedGraphGenesisCandidateCompiler {
   }>): ExactGraphCandidate {
     const packageLock = this.postStates.packageLock(input.postState, input.privatePostStateCapsule);
     if (input.postState.planHash !== input.plan.planHash) failPostState();
-    const candidate = this.candidates.compile({
-      profileId: 'filesystem-2026-7-10-candidate',
-      profileVersion: 1,
-      topPackage: { name: TARGET, exactVersion: VERSION, exactEntrypointRelativePath: 'dist/index.js' },
-      registryOrigin: input.plan.registryOrigin,
-      runtimeConstraint: {
-        os: 'darwin', architecture: 'arm64', nodeMajor: 26,
-        nodeVersion: input.plan.nodeVersion,
-        npmGraphGeneratorVersion: input.plan.npmVersion,
-        lockfileVersion: 3,
-      },
-      materializationRulesVersion: 1,
-      archiveRulesVersion: 1,
-      workerProtocolVersion: ARCHIVE_WORKER_PROTOCOL_VERSION,
-      limits: PACKAGE_STAGE_HARD_CEILINGS,
-      packageLock,
-    });
+    let candidate: ExactGraphCandidate;
+    try {
+      candidate = this.candidates.compile({
+        profileId: 'filesystem-2026-7-10-candidate',
+        profileVersion: 1,
+        topPackage: { name: TARGET, exactVersion: VERSION, exactEntrypointRelativePath: 'dist/index.js' },
+        registryOrigin: input.plan.registryOrigin,
+        runtimeConstraint: {
+          os: 'darwin', architecture: 'arm64', nodeMajor: 26,
+          nodeVersion: input.plan.nodeVersion,
+          npmGraphGeneratorVersion: input.plan.npmVersion,
+          lockfileVersion: 3,
+        },
+        materializationRulesVersion: 1,
+        archiveRulesVersion: 1,
+        workerProtocolVersion: ARCHIVE_WORKER_PROTOCOL_VERSION,
+        limits: PACKAGE_STAGE_HARD_CEILINGS,
+        packageLock,
+      });
+    } catch (error) {
+      const failure = this.candidates.claimFailure(error);
+      if (failure !== undefined && this.candidates.authenticatesFailure(failure)
+        && typeof error === 'object' && error !== null) {
+        this.#failures.add(failure);
+        this.#errors.set(error, failure);
+      }
+      throw error;
+    }
     this.#pairs.set(candidate, input.postState);
     return candidate;
   }
@@ -238,6 +258,36 @@ export class HardenedGraphGenesisCandidateCompiler {
   authenticatesPair(candidate: unknown, postState: unknown): candidate is ExactGraphCandidate {
     return this.candidates.authenticates(candidate) && typeof postState === 'object' && postState !== null
       && this.#pairs.get(candidate) === postState;
+  }
+
+  /** Claims only the failure paired by this compiler's own compile call, once. */
+  claimFailure(error: unknown): AuthenticatedExactGraphCandidateFailure | undefined {
+    if (typeof error !== 'object' || error === null || this.#claimedErrors.has(error)) return undefined;
+    const failure = this.#errors.get(error);
+    if (failure === undefined || !this.#failures.has(failure)) return undefined;
+    this.#claimedErrors.add(error);
+    return failure;
+  }
+
+  authenticatesFailure(value: unknown): value is AuthenticatedExactGraphCandidateFailure {
+    return typeof value === 'object' && value !== null && this.#failures.has(value);
+  }
+
+  /** One bounded local projection per compiler-paired failure; writer failures are inert. */
+  emitFailureDiagnostic(failure: AuthenticatedExactGraphCandidateFailure, write: DiagnosticWriter): boolean {
+    if (!this.authenticatesFailure(failure) || this.#diagnosticsAttempted.has(failure)) return false;
+    this.#diagnosticsAttempted.add(failure);
+    const line = `${CANDIDATE_DIAGNOSTIC_PREFIX}${canonicalJson({
+      diagnosticVersion: failure.diagnosticVersion,
+      predicate: failure.predicate,
+    })}\n`;
+    if (Buffer.byteLength(line, 'utf8') > MAX_POST_STATE_DIAGNOSTIC_BYTES) return false;
+    try {
+      write(line);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

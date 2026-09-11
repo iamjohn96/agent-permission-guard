@@ -77,6 +77,56 @@ describe('exact production graph and read-only artifact acceptance foundation', 
     expect(() => authority.compile(cyclic)).toThrowError(expect.objectContaining({ code: 'graph_lock_invalid' }));
   });
 
+  it('issues one opaque, authority-authenticated closed predicate for every candidate compiler rejection class', () => {
+    const archive = packageArchive('fixture', '1.0.0');
+    const cases: ReadonlyArray<readonly [string, (input: ExactGraphCandidateInput & { packageLock: LockFixture }) => void]> = [
+      ['candidate_input_rejected', (input) => { (input as { profileId: string }).profileId = '!'; }],
+      ['lock_document_shape_rejected', (input) => { input.packageLock = [] as unknown as LockFixture; }],
+      ['root_package_shape_rejected', (input) => { delete input.packageLock.packages['']; }],
+      ['root_dependency_identity_rejected', (input) => { (input.packageLock.packages[''] as LockPackage).dependencies = { fixture: '2.0.0' }; }],
+      ['graph_size_rejected', (input) => { delete input.packageLock.packages['node_modules/fixture']; }],
+      ['install_path_rejected', (input) => {
+        const record = input.packageLock.packages['node_modules/fixture']!;
+        delete input.packageLock.packages['node_modules/fixture'];
+        input.packageLock.packages.bad = record;
+      }],
+      ['package_record_shape_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).unexpected = true; }],
+      ['package_role_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).hasInstallScript = true; }],
+      ['package_artifact_identity_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).integrity = 'sha512-not-base64'; }],
+      ['dependency_specifier_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).dependencies = { dep: 'file:private' }; }],
+      ['dependency_resolution_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).dependencies = { dep: '1.0.0' }; }],
+      ['target_identity_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).version = '2.0.0'; }],
+      ['graph_connectivity_rejected', (input) => {
+        input.packageLock = withPackage(input.packageLock, 'node_modules/unused', {
+          version: '2.0.0', resolved: 'https://registry.npmjs.org/unused/-/unused-2.0.0.tgz', integrity: sha512(Buffer.from('unused')),
+        });
+      }],
+    ];
+    for (const [predicate, mutate] of cases) {
+      const authority = new ExactGraphCandidateAuthority();
+      const input = candidateInput(archive);
+      mutate(input);
+      let error: unknown;
+      try { authority.compile(input); } catch (thrown) { error = thrown; }
+      expect(error).toMatchObject({ code: 'graph_lock_invalid' });
+      const failure = authority.claimFailure(error);
+      expect(failure).toEqual({ diagnosticVersion: 1, predicate });
+      expect(Object.isFrozen(failure)).toBe(true);
+      expect(JSON.stringify(failure)).not.toContain('registry.npmjs.org');
+      expect(authority.authenticatesFailure(failure)).toBe(true);
+      const copied = { ...failure! };
+      const forgedPredicate = { ...failure!, predicate: 'forged_predicate' };
+      const forgedExtra = { ...failure!, rawLockBytes: 'private-lock-bytes' };
+      expect(authority.authenticatesFailure(copied)).toBe(false);
+      expect(authority.authenticatesFailure(forgedPredicate)).toBe(false);
+      expect(authority.authenticatesFailure(forgedExtra)).toBe(false);
+      expect('emitFailureDiagnostic' in authority).toBe(false);
+      expect(authority.claimFailure(error)).toBeUndefined();
+      expect(authority.claimFailure(new Error('graph_lock_invalid'))).toBeUndefined();
+      expect(new ExactGraphCandidateAuthority().authenticatesFailure(failure)).toBe(false);
+    }
+  });
+
   it('models Node ancestor lookup rather than accepting an arbitrary same-name dependency', () => {
     const topArchive = packageArchive('fixture', '1.0.0', { dep: '^2.0.0' });
     const authority = new ExactGraphCandidateAuthority();

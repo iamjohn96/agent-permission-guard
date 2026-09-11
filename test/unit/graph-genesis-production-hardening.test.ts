@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { LocalApprovalService } from '../../src/approval/service.js';
 import { ExactGraphCandidateAuthority } from '../../src/stage/exact-production-graph.js';
+import { PostStateBoundGraphGenesisCleanupAuthority } from '../../src/stage/graph-genesis-cleanup.js';
 import { HardenedControlledGraphGenesisAuthority } from '../../src/stage/graph-genesis-completion.js';
 import {
   HardenedGraphGenesisCandidateCompiler,
@@ -33,6 +34,7 @@ import {
   type RuntimeVersionProbeExecutor,
 } from '../../src/stage/graph-genesis-hardening.js';
 import { SyntheticGraphGenesisStartLeaseAuthority } from '../../src/stage/graph-genesis-composition.js';
+import { classifyGraphGenesisFailure, selectGraphGenesisFailureTerminalStatus } from '../../src/stage/graph-genesis-live-state.js';
 import {
   BoundedNpmPublicMetadataTransport,
   createLocalTlsPinnedHttpsClientForTest,
@@ -1008,6 +1010,110 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     const brokenFailure = brokenPostStates.claimFailure(brokenThrown);
     expect(brokenPostStates.emitFailureDiagnostic(brokenFailure!, () => { throw new Error('broken stderr'); })).toBe(false);
     expect(brokenPostStates.emitFailureDiagnostic(brokenFailure!, () => undefined)).toBe(false);
+  });
+
+  it('pairs a candidate compiler failure only with its own compile error and projects it once without lock details', async () => {
+    const fixture = await planFixture();
+    const lock = exactTargetLock();
+    (lock.packages['node_modules/@modelcontextprotocol/server-filesystem'] as Record<string, unknown>).hasInstallScript = true;
+    writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(lock));
+    const postStates = new HardenedGraphGenesisPostStateAuthority(fixture.planAuthority, fixture.workspaceAuthority);
+    const inspected = await postStates.inspect({
+      plan: fixture.prepared.plan, executionCapsule: fixture.prepared.capsule, workspace: fixture.workspace,
+    });
+    const candidates = new ExactGraphCandidateAuthority();
+    const compiler = new HardenedGraphGenesisCandidateCompiler(postStates, candidates);
+    let thrown: unknown;
+    try {
+      compiler.compile({
+        plan: fixture.prepared.plan, postState: inspected.evidence, privatePostStateCapsule: inspected.privateCapsule,
+      });
+    } catch (error) { thrown = error; }
+    expect(thrown).toMatchObject({ code: 'graph_lock_invalid' });
+    const failure = compiler.claimFailure(thrown);
+    expect(failure).toEqual({ diagnosticVersion: 1, predicate: 'package_role_rejected' });
+    expect(compiler.claimFailure(thrown)).toBeUndefined();
+    expect(compiler.claimFailure(new Error('graph_lock_invalid'))).toBeUndefined();
+    expect(compiler.authenticatesFailure(failure)).toBe(true);
+    expect(new HardenedGraphGenesisCandidateCompiler(postStates, candidates).authenticatesFailure(failure)).toBe(false);
+    const lines: string[] = [];
+    const copied = { ...failure! };
+    const forgedPredicate = { ...failure!, predicate: 'forged_predicate' };
+    const forgedExtra = { ...failure!, rawLockBytes: 'private-lock-bytes' };
+    for (const forged of [copied, forgedPredicate, forgedExtra]) {
+      expect(compiler.authenticatesFailure(forged)).toBe(false);
+      expect(compiler.emitFailureDiagnostic(
+        forged as unknown as Parameters<typeof compiler.emitFailureDiagnostic>[0],
+        (line) => lines.push(line),
+      )).toBe(false);
+    }
+    expect(lines).toEqual([]);
+    expect(compiler.emitFailureDiagnostic(failure!, (line) => lines.push(line))).toBe(true);
+    expect(compiler.emitFailureDiagnostic(failure!, () => undefined)).toBe(false);
+    expect(lines).toEqual(['[apg] graph-genesis-candidate-diagnostic {"diagnosticVersion":1,"predicate":"package_role_rejected"}\n']);
+    expect(Buffer.byteLength(lines[0]!, 'utf8')).toBeLessThanOrEqual(1024);
+    expect(lines[0]).not.toContain(fixture.workspace.rootRealpath);
+    expect(lines[0]).not.toContain('@modelcontextprotocol');
+    const brokenCompiler = new HardenedGraphGenesisCandidateCompiler(postStates, new ExactGraphCandidateAuthority());
+    let brokenThrown: unknown;
+    try {
+      brokenCompiler.compile({
+        plan: fixture.prepared.plan, postState: inspected.evidence, privatePostStateCapsule: inspected.privateCapsule,
+      });
+    } catch (error) { brokenThrown = error; }
+    const brokenFailure = brokenCompiler.claimFailure(brokenThrown);
+    expect(brokenCompiler.emitFailureDiagnostic(brokenFailure!, () => { throw new Error('synthetic broken stderr'); })).toBe(false);
+    expect(brokenCompiler.emitFailureDiagnostic(brokenFailure!, () => lines.push('must not retry'))).toBe(false);
+    expect(lines).toHaveLength(1);
+  });
+
+  it('keeps candidate output absent while completing post-state-bound cleanup and the existing failure classification', async () => {
+    const fixture = await planFixture();
+    const lock = exactTargetLock();
+    (lock.packages['node_modules/@modelcontextprotocol/server-filesystem'] as Record<string, unknown>).hasInstallScript = true;
+    writeFileSync(join(fixture.workspace.rootRealpath, 'package-lock.json'), JSON.stringify(lock));
+    const audit = new GraphGenesisAuditGate(fixture.prepared.plan.planHash, new MemoryAuditSink());
+    await audit.record('runtime_snapshot_complete', { runtimeManifestDigest: '1'.repeat(64) });
+    await audit.record('containment_probe_complete', { containmentEvidenceDigest: '2'.repeat(64) });
+    await audit.record('plan_ready', { executionEnvelopeHash: '3'.repeat(64) });
+    await audit.record('authorization_finalized');
+    await audit.record('broker_armed');
+    await audit.record('npm_spawn_intent_recorded');
+    await audit.record('npm_spawn_started');
+    await audit.record('metadata_request_started', { sequence: 1, packageName: 'fixture' });
+    await audit.record('metadata_response_validated', { sequence: 1, packageName: 'fixture', responseBytes: 32 });
+    await audit.record('npm_terminal_observed', { status: 'completed', exitCode: 0, stdoutBytes: 0, stderrBytes: 0 });
+    await audit.record('listener_drained', { acceptedHandlerCount: 1 });
+    await audit.record('lock_validation_started');
+    const postStates = new HardenedGraphGenesisPostStateAuthority(fixture.planAuthority, fixture.workspaceAuthority);
+    const inspected = await postStates.inspect({
+      plan: fixture.prepared.plan, executionCapsule: fixture.prepared.capsule, workspace: fixture.workspace,
+    });
+    await audit.record('post_state_validated', { postStateDigest: inspected.evidence.evidenceDigest });
+    const compiler = new HardenedGraphGenesisCandidateCompiler(postStates, new ExactGraphCandidateAuthority());
+    let candidate: ReturnType<HardenedGraphGenesisCandidateCompiler['compile']> | undefined;
+    let thrown: unknown;
+    try {
+      candidate = compiler.compile({
+        plan: fixture.prepared.plan, postState: inspected.evidence, privatePostStateCapsule: inspected.privateCapsule,
+      });
+    } catch (error) { thrown = error; }
+    expect(thrown).toMatchObject({ code: 'graph_lock_invalid' });
+    expect(candidate).toBeUndefined();
+    expect(audit.events).not.toContain('candidate_compiled');
+    expect(audit.events).not.toContain('candidate_output_intent');
+    const cleanups = new PostStateBoundGraphGenesisCleanupAuthority(postStates);
+    const inventory = await cleanups.capture(fixture.workspace, inspected.evidence);
+    const cleanup = await cleanups.cleanup(fixture.workspace, inventory);
+    expect(cleanups.authenticates(cleanup)).toBe(true);
+    expect(cleanup.status).toBe('complete');
+    expect(existsSync(fixture.workspace.rootRealpath)).toBe(false);
+    expect(classifyGraphGenesisFailure({
+      cancelled: false, externalReadMayHaveOccurred: true, processSpawned: true,
+      cleanupComplete: true, cleanupFailed: false, rootPreserved: false, terminalUnknown: false,
+    })).toMatchObject({ status: 'incomplete', exitCode: 4, reasonCode: 'incomplete_external_read' });
+    expect(selectGraphGenesisFailureTerminalStatus({ externalReadStatus: 'validated', cancelled: false }))
+      .toBe('execution_error');
   });
 
   it('authenticates completion only after process, broker, candidate, cleanup and ordered audit all agree', async () => {

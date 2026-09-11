@@ -141,6 +141,7 @@ export async function runExactProductionGraphGenesisLive(
   let postState: AuthenticatedHardenedGraphGenesisPostState | undefined;
   let cleanup: AuthenticatedPostStateCleanup | undefined;
   let postStates: HardenedGraphGenesisPostStateAuthority | undefined;
+  let candidateCompiler: HardenedGraphGenesisCandidateCompiler | undefined;
   let cleanups: PostStateBoundGraphGenesisCleanupAuthority | undefined;
   let spawned = false;
   let terminalCommitted = false;
@@ -354,9 +355,9 @@ export async function runExactProductionGraphGenesisLive(
     await authorization.executionAudit.record('post_state_validated', { postStateDigest: postState.evidenceDigest });
     throwIfAborted(controller.signal);
     phases.advance('POST_STATE_VALIDATED');
-    const compiler = new HardenedGraphGenesisCandidateCompiler(postStates, exactCandidates);
-    candidate = compiler.compile({ plan, postState, privatePostStateCapsule: inspected.privateCapsule });
-    if (!compiler.authenticatesPair(candidate, postState)) fail();
+    candidateCompiler = new HardenedGraphGenesisCandidateCompiler(postStates, exactCandidates);
+    candidate = candidateCompiler.compile({ plan, postState, privatePostStateCapsule: inspected.privateCapsule });
+    if (!candidateCompiler.authenticatesPair(candidate, postState)) fail();
     await authorization.executionAudit.record('candidate_compiled');
     phases.advance('CANDIDATE_COMPILED');
     throwIfAborted(controller.signal);
@@ -441,6 +442,7 @@ export async function runExactProductionGraphGenesisLive(
       }
     }
     const postStateFailure = postStates?.claimFailure(error);
+    const candidateFailure = candidateCompiler?.claimFailure(error);
     const metadata = executionAudit?.metadataSummary();
     const externalRead = metadata !== undefined && metadata.externalReadStatus !== 'not_started';
     const quarantineReferenceDigest = root === undefined
@@ -499,6 +501,11 @@ export async function runExactProductionGraphGenesisLive(
       && executionAudit?.events.includes('npm_terminal_observed') === true
       && executionAudit.events.includes('listener_drained') === true) {
       postStates?.emitFailureDiagnostic(postStateFailure, (line) => writeSync(2, line, null, 'utf8'));
+    }
+    if (candidateFailure !== undefined && failureTerminalAttempted
+      && executionAudit?.events.includes('npm_terminal_observed') === true
+      && executionAudit.events.includes('listener_drained') === true) {
+      candidateCompiler?.emitFailureDiagnostic(candidateFailure, (line) => writeSync(2, line, null, 'utf8'));
     }
     try { auditSource?.database.close(); } catch { terminalUnknown = true; }
     auditSource = undefined;

@@ -68,6 +68,30 @@ export type ExactGraphCandidateInput = Readonly<{
   packageLock: unknown;
 }>;
 
+/** Closed, non-sensitive reasons for rejecting an exact lock candidate. */
+export type ExactGraphCandidateFailurePredicate =
+  | 'candidate_input_rejected'
+  | 'lock_document_shape_rejected'
+  | 'root_package_shape_rejected'
+  | 'root_dependency_identity_rejected'
+  | 'graph_size_rejected'
+  | 'install_path_rejected'
+  | 'package_record_shape_rejected'
+  | 'package_role_rejected'
+  | 'package_artifact_identity_rejected'
+  | 'dependency_specifier_rejected'
+  | 'dependency_resolution_rejected'
+  | 'target_identity_rejected'
+  | 'graph_connectivity_rejected';
+
+/** Authority-local private diagnostic. It never contains a path, URL, package name, or lock bytes. */
+export type AuthenticatedExactGraphCandidateFailure = Readonly<{
+  diagnosticVersion: 1;
+  predicate: ExactGraphCandidateFailurePredicate;
+}>;
+
+type CandidateFailure = (predicate: ExactGraphCandidateFailurePredicate) => never;
+
 export type GraphMetadataObservation = Readonly<{
   packageName: string;
   exactVersion: string;
@@ -183,10 +207,13 @@ export type AcceptedProductionGraphProfile = Readonly<{
 
 export class ExactGraphCandidateAuthority {
   readonly #authenticated = new WeakSet<object>();
+  readonly #failures = new WeakSet<object>();
+  readonly #errors = new WeakMap<object, AuthenticatedExactGraphCandidateFailure>();
+  readonly #claimedErrors = new WeakSet<object>();
 
   compile(input: ExactGraphCandidateInput): ExactGraphCandidate {
-    const normalized = normalizeCandidateInput(input);
-    const graphNodes = compileLockGraph(input.packageLock, normalized);
+    const normalized = normalizeCandidateInput(input, (predicate) => this.#fail(predicate));
+    const graphNodes = compileLockGraph(input.packageLock, normalized, (predicate) => this.#fail(predicate));
     const unsigned = deepFreeze({
       candidateSchemaVersion: 1 as const,
       ...normalized,
@@ -203,6 +230,27 @@ export class ExactGraphCandidateAuthority {
 
   assertAuthenticates(candidate: unknown): asserts candidate is ExactGraphCandidate {
     if (!this.authenticates(candidate)) throw new PackageStageError('profile_not_authenticated');
+  }
+
+  /** Returns a compiler rejection once only for the exact error object this authority created. */
+  claimFailure(error: unknown): AuthenticatedExactGraphCandidateFailure | undefined {
+    if (typeof error !== 'object' || error === null || this.#claimedErrors.has(error)) return undefined;
+    const failure = this.#errors.get(error);
+    if (failure === undefined) return undefined;
+    this.#claimedErrors.add(error);
+    return failure;
+  }
+
+  authenticatesFailure(value: unknown): value is AuthenticatedExactGraphCandidateFailure {
+    return typeof value === 'object' && value !== null && this.#failures.has(value);
+  }
+
+  #fail(predicate: ExactGraphCandidateFailurePredicate): never {
+    const failure = Object.freeze({ diagnosticVersion: 1 as const, predicate });
+    const error = new PackageStageError('graph_lock_invalid');
+    this.#failures.add(failure);
+    this.#errors.set(error, failure);
+    throw error;
   }
 }
 
@@ -442,23 +490,26 @@ export class SyntheticProductionProfileReviewAuthority {
   }
 }
 
-function normalizeCandidateInput(input: ExactGraphCandidateInput): Omit<ExactGraphCandidate, 'candidateSchemaVersion' | 'graphNodes' | 'candidateDigest'> {
-  assertRecord(input);
+function normalizeCandidateInput(
+  input: ExactGraphCandidateInput,
+  fail: CandidateFailure,
+): Omit<ExactGraphCandidate, 'candidateSchemaVersion' | 'graphNodes' | 'candidateDigest'> {
+  assertRecord(input, fail, 'candidate_input_rejected');
   assertExactKeys(input, [
     'profileId', 'profileVersion', 'topPackage', 'registryOrigin', 'runtimeConstraint',
     'materializationRulesVersion', 'archiveRulesVersion', 'workerProtocolVersion', 'limits', 'packageLock',
-  ]);
-  if (!IDENTIFIER.test(input.profileId) || !isPositiveInteger(input.profileVersion)) failLock();
-  assertRecord(input.topPackage);
-  assertExactKeys(input.topPackage, ['name', 'exactVersion', 'exactEntrypointRelativePath']);
-  if (!isPackageName(input.topPackage.name) || !isExactVersion(input.topPackage.exactVersion)) failLock();
-  const limits = normalizeLimits(input.limits);
-  validatePortableRelativePath(input.topPackage.exactEntrypointRelativePath, limits);
-  const registryOrigin = normalizeRegistryOrigin(input.registryOrigin);
-  assertRecord(input.runtimeConstraint);
+  ], fail, 'candidate_input_rejected');
+  if (!IDENTIFIER.test(input.profileId) || !isPositiveInteger(input.profileVersion)) fail('candidate_input_rejected');
+  assertRecord(input.topPackage, fail, 'candidate_input_rejected');
+  assertExactKeys(input.topPackage, ['name', 'exactVersion', 'exactEntrypointRelativePath'], fail, 'candidate_input_rejected');
+  if (!isPackageName(input.topPackage.name) || !isExactVersion(input.topPackage.exactVersion)) fail('candidate_input_rejected');
+  const limits = normalizeLimits(input.limits, fail);
+  try { validatePortableRelativePath(input.topPackage.exactEntrypointRelativePath, limits); } catch { fail('candidate_input_rejected'); }
+  const registryOrigin = normalizeRegistryOrigin(input.registryOrigin, fail);
+  assertRecord(input.runtimeConstraint, fail, 'candidate_input_rejected');
   assertExactKeys(input.runtimeConstraint, [
     'os', 'architecture', 'nodeMajor', 'nodeVersion', 'npmGraphGeneratorVersion', 'lockfileVersion',
-  ]);
+  ], fail, 'candidate_input_rejected');
   if (
     input.runtimeConstraint.os !== 'darwin'
     || input.runtimeConstraint.architecture !== 'arm64'
@@ -469,7 +520,7 @@ function normalizeCandidateInput(input: ExactGraphCandidateInput): Omit<ExactGra
     || input.workerProtocolVersion !== ARCHIVE_WORKER_PROTOCOL_VERSION
     || !isPositiveInteger(input.materializationRulesVersion)
     || !isPositiveInteger(input.archiveRulesVersion)
-  ) failLock();
+  ) fail('candidate_input_rejected');
   return deepFreeze({
     profileId: input.profileId,
     profileVersion: input.profileVersion,
@@ -486,54 +537,57 @@ function normalizeCandidateInput(input: ExactGraphCandidateInput): Omit<ExactGra
 function compileLockGraph(
   input: unknown,
   candidate: Omit<ExactGraphCandidate, 'candidateSchemaVersion' | 'graphNodes' | 'candidateDigest'>,
+  fail: CandidateFailure,
 ): readonly ExactGraphCandidateNode[] {
-  assertRecord(input);
-  assertExactKeys(input, ['name', 'version', 'lockfileVersion', 'requires', 'packages']);
+  assertRecord(input, fail, 'lock_document_shape_rejected');
+  assertExactKeys(input, ['name', 'version', 'lockfileVersion', 'requires', 'packages'], fail, 'lock_document_shape_rejected');
   if (
     typeof input.name !== 'string'
     || typeof input.version !== 'string'
     || input.lockfileVersion !== 3
     || input.requires !== true
-  ) failLock();
-  assertRecord(input.packages);
+  ) fail('lock_document_shape_rejected');
+  assertRecord(input.packages, fail, 'lock_document_shape_rejected');
   const packageRecords = input.packages;
   const root = packageRecords[''];
-  assertRecord(root);
-  assertAllowedKeys(root, ['name', 'version', 'dependencies', 'engines']);
-  if (typeof root.name !== 'string' || typeof root.version !== 'string') failLock();
-  const rootDependencies = parseDependencies(root.dependencies);
-  if (rootDependencies.size !== 1 || rootDependencies.get(candidate.topPackage.name) !== candidate.topPackage.exactVersion) failLock();
+  assertRecord(root, fail, 'root_package_shape_rejected');
+  assertAllowedKeys(root, ['name', 'version', 'dependencies', 'engines'], fail, 'root_package_shape_rejected');
+  if (typeof root.name !== 'string' || typeof root.version !== 'string') fail('root_package_shape_rejected');
+  const rootDependencies = parseDependencies(root.dependencies, fail, 'root_dependency_identity_rejected');
+  if (rootDependencies.size !== 1 || rootDependencies.get(candidate.topPackage.name) !== candidate.topPackage.exactVersion) fail('root_dependency_identity_rejected');
 
   const paths = Object.keys(packageRecords).filter((path) => path !== '').sort(compareText);
-  if (paths.length === 0 || paths.length > candidate.limits.graphNodes) failLock();
+  if (paths.length === 0 || paths.length > candidate.limits.graphNodes) fail('graph_size_rejected');
   const byPath = new Map<string, ExactGraphCandidateNode>();
   const portablePaths = new Set<string>();
   for (const installPath of paths) {
-    validatePortableRelativePath(installPath, candidate.limits);
-    if (!installPath.startsWith('node_modules/')) failLock();
+    try { validatePortableRelativePath(installPath, candidate.limits); } catch { fail('install_path_rejected'); }
+    if (!installPath.startsWith('node_modules/')) fail('install_path_rejected');
     const portable = installPath.toLocaleLowerCase('en-US');
-    if (portablePaths.has(portable)) failLock();
+    if (portablePaths.has(portable)) fail('install_path_rejected');
     portablePaths.add(portable);
     const record = packageRecords[installPath];
-    assertRecord(record);
+    assertRecord(record, fail, 'package_record_shape_rejected');
     assertAllowedKeys(record, [
       'version', 'resolved', 'integrity', 'dependencies', 'bin', 'engines', 'license', 'funding',
       'dev', 'optional', 'peer', 'devOptional', 'peerDependencies', 'peerDependenciesMeta',
       'optionalDependencies', 'bundleDependencies', 'bundledDependencies', 'hasInstallScript',
       'link', 'inBundle', 'os', 'cpu',
-    ]);
+    ], fail, 'package_record_shape_rejected');
     if (
       record.dev === true || record.optional === true || record.peer === true || record.devOptional === true
       || record.hasInstallScript === true || record.link === true || record.inBundle === true
       || record.peerDependencies !== undefined || record.peerDependenciesMeta !== undefined
       || record.optionalDependencies !== undefined || record.bundleDependencies !== undefined
       || record.bundledDependencies !== undefined || record.os !== undefined || record.cpu !== undefined
-      || !isExactVersion(record.version) || typeof record.resolved !== 'string' || typeof record.integrity !== 'string'
-    ) failLock();
-    validateTarballUrl(record.resolved, candidate.registryOrigin);
-    parseSha512Integrity(record.integrity);
-    const packageName = packageNameFromInstallPath(installPath);
-    const dependencies = parseDependencies(record.dependencies);
+    ) fail('package_role_rejected');
+    if (!isExactVersion(record.version) || typeof record.resolved !== 'string' || typeof record.integrity !== 'string') {
+      fail('package_artifact_identity_rejected');
+    }
+    validateTarballUrl(record.resolved, candidate.registryOrigin, fail);
+    try { parseSha512Integrity(record.integrity); } catch { fail('package_artifact_identity_rejected'); }
+    const packageName = packageNameFromInstallPath(installPath, fail);
+    const dependencies = parseDependencies(record.dependencies, fail, 'dependency_specifier_rejected');
     byPath.set(installPath, deepFreeze({
       installPath,
       packageName,
@@ -552,42 +606,43 @@ function compileLockGraph(
   const nodes = [...byPath.values()].map((node) => deepFreeze({
     ...node,
     dependencyEdges: Object.freeze(node.dependencyEdges.map((edge) => {
-      const targetPath = resolveNodeDependency(node.installPath, edge.packageName, byPath);
+      const targetPath = resolveNodeDependency(node.installPath, edge.packageName, byPath, fail);
       const target = byPath.get(targetPath);
-      if (target?.packageName !== edge.packageName) failLock();
+      if (target?.packageName !== edge.packageName) fail('dependency_resolution_rejected');
       return Object.freeze({ ...edge, installPath: targetPath });
     }).sort((left, right) => compareText(left.packageName, right.packageName))),
   })).sort((left, right) => compareText(left.installPath, right.installPath));
 
   const topPath = `node_modules/${candidate.topPackage.name}`;
   const top = byPath.get(topPath);
-  if (top?.packageName !== candidate.topPackage.name || top.exactVersion !== candidate.topPackage.exactVersion) failLock();
-  assertConnectedAcyclic(nodes, topPath);
+  if (top?.packageName !== candidate.topPackage.name || top.exactVersion !== candidate.topPackage.exactVersion) fail('target_identity_rejected');
+  assertConnectedAcyclic(nodes, topPath, fail);
   return Object.freeze(nodes);
 }
 
-function assertConnectedAcyclic(nodes: readonly ExactGraphCandidateNode[], topPath: string): void {
+function assertConnectedAcyclic(nodes: readonly ExactGraphCandidateNode[], topPath: string, fail: CandidateFailure): void {
   const byPath = new Map(nodes.map((node) => [node.installPath, node]));
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const visit = (path: string): void => {
-    if (visiting.has(path)) failLock();
+    if (visiting.has(path)) fail('graph_connectivity_rejected');
     if (visited.has(path)) return;
     const node = byPath.get(path);
-    if (node === undefined) failLock();
+    if (node === undefined) fail('graph_connectivity_rejected');
     visiting.add(path);
     for (const edge of node.dependencyEdges) visit(edge.installPath);
     visiting.delete(path);
     visited.add(path);
   };
   visit(topPath);
-  if (visited.size !== nodes.length) failLock();
+  if (visited.size !== nodes.length) fail('graph_connectivity_rejected');
 }
 
 function resolveNodeDependency(
   declaringPath: string,
   dependencyName: string,
   byPath: ReadonlyMap<string, ExactGraphCandidateNode>,
+  fail: CandidateFailure,
 ): string {
   let cursor = declaringPath;
   while (true) {
@@ -599,21 +654,21 @@ function resolveNodeDependency(
   }
   const root = `node_modules/${dependencyName}`;
   if (byPath.has(root)) return root;
-  failLock();
+  fail('dependency_resolution_rejected');
 }
 
-function packageNameFromInstallPath(path: string): string {
+function packageNameFromInstallPath(path: string, fail: CandidateFailure): string {
   const segments = path.split('/');
   let index = 0;
   let lastName: string | undefined;
   while (index < segments.length) {
-    if (segments[index] !== 'node_modules') failLock();
+    if (segments[index] !== 'node_modules') fail('install_path_rejected');
     index += 1;
     const first = segments[index];
-    if (first === undefined) failLock();
+    if (first === undefined) fail('install_path_rejected');
     if (first.startsWith('@')) {
       const second = segments[index + 1];
-      if (second === undefined) failLock();
+      if (second === undefined) fail('install_path_rejected');
       lastName = `${first}/${second}`;
       index += 2;
     } else {
@@ -621,13 +676,17 @@ function packageNameFromInstallPath(path: string): string {
       index += 1;
     }
   }
-  if (lastName === undefined || !isPackageName(lastName)) failLock();
+  if (lastName === undefined || !isPackageName(lastName)) fail('install_path_rejected');
   return lastName;
 }
 
-function parseDependencies(input: unknown): Map<string, string> {
+function parseDependencies(
+  input: unknown,
+  fail: CandidateFailure,
+  predicate: 'root_dependency_identity_rejected' | 'dependency_specifier_rejected',
+): Map<string, string> {
   if (input === undefined) return new Map();
-  assertRecord(input);
+  assertRecord(input, fail, predicate);
   const output = new Map<string, string>();
   for (const [name, specifier] of Object.entries(input)) {
     if (
@@ -635,7 +694,7 @@ function parseDependencies(input: unknown): Map<string, string> {
       || typeof specifier !== 'string'
       || !isSafeText(specifier, 256)
       || /^(?:file:|git(?:\+|:)|https?:|workspace:|npm:)/u.test(specifier)
-    ) failLock();
+    ) fail(predicate);
     output.set(name, specifier);
   }
   return output;
@@ -680,21 +739,21 @@ function metadataUrl(registryOrigin: string, packageName: string, exactVersion: 
   return `${registryOrigin}${packageName.replace('/', '%2f')}/${exactVersion}`;
 }
 
-function normalizeLimits(input: PackageStageLimits): PackageStageLimits {
-  assertRecord(input);
+function normalizeLimits(input: PackageStageLimits, fail: CandidateFailure): PackageStageLimits {
+  assertRecord(input, fail, 'candidate_input_rejected');
   const keys = Object.keys(PACKAGE_STAGE_HARD_CEILINGS) as (keyof PackageStageLimits)[];
-  assertExactKeys(input, keys);
+  assertExactKeys(input, keys, fail, 'candidate_input_rejected');
   const output = {} as Record<keyof PackageStageLimits, number>;
   for (const key of keys) {
     const value = input[key];
-    if (!isPositiveInteger(value) || value > PACKAGE_STAGE_HARD_CEILINGS[key]) failLock();
+    if (!isPositiveInteger(value) || value > PACKAGE_STAGE_HARD_CEILINGS[key]) fail('candidate_input_rejected');
     output[key] = value;
   }
   if (
     output.compressedArtifactBytes > output.totalCompressedBytes
     || output.uncompressedArtifactBytes > output.totalUncompressedBytes
     || output.regularFileBytes > output.uncompressedArtifactBytes
-  ) failLock();
+  ) fail('candidate_input_rejected');
   return Object.freeze(output as PackageStageLimits);
 }
 
@@ -736,38 +795,52 @@ async function fetchMetadataWithTimeout(
   }
 }
 
-function normalizeRegistryOrigin(value: string): string {
+function normalizeRegistryOrigin(value: string, fail: CandidateFailure): string {
   let url: URL;
-  try { url = new URL(value); } catch { failLock(); }
+  try { url = new URL(value); } catch { fail('candidate_input_rejected'); }
   if (
     url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.pathname !== '/'
     || url.search !== '' || url.hash !== ''
-  ) failLock();
+  ) fail('candidate_input_rejected');
   return `${url.origin}/`;
 }
 
-function validateTarballUrl(value: string, registryOrigin: string): void {
+function validateTarballUrl(value: string, registryOrigin: string, fail: CandidateFailure): void {
   let url: URL;
-  try { url = new URL(value); } catch { failLock(); }
+  try { url = new URL(value); } catch { fail('package_artifact_identity_rejected'); }
   if (
     url.protocol !== 'https:' || url.origin !== new URL(registryOrigin).origin
     || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== ''
     || !url.pathname.endsWith('.tgz')
-  ) failLock();
+  ) fail('package_artifact_identity_rejected');
 }
 
-function assertAllowedKeys(input: Record<string, unknown>, allowed: readonly string[]): void {
-  if (Object.keys(input).some((key) => !allowed.includes(key))) failLock();
+function assertAllowedKeys(
+  input: Record<string, unknown>,
+  allowed: readonly string[],
+  fail: CandidateFailure,
+  predicate: ExactGraphCandidateFailurePredicate,
+): void {
+  if (Object.keys(input).some((key) => !allowed.includes(key))) fail(predicate);
 }
 
-function assertExactKeys(input: object, expected: readonly string[]): void {
+function assertExactKeys(
+  input: object,
+  expected: readonly string[],
+  fail: CandidateFailure,
+  predicate: ExactGraphCandidateFailurePredicate,
+): void {
   const actual = Object.keys(input).sort(compareText);
   const wanted = [...expected].sort(compareText);
-  if (canonicalJson(actual) !== canonicalJson(wanted)) failLock();
+  if (canonicalJson(actual) !== canonicalJson(wanted)) fail(predicate);
 }
 
-function assertRecord(input: unknown): asserts input is Record<string, unknown> {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) failLock();
+function assertRecord(
+  input: unknown,
+  fail: CandidateFailure,
+  predicate: ExactGraphCandidateFailurePredicate,
+): asserts input is Record<string, unknown> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) fail(predicate);
 }
 
 function isPackageName(value: unknown): value is string {
@@ -789,10 +862,6 @@ function isPositiveInteger(value: unknown): value is number {
 
 function isBoundedInteger(value: unknown, min: number, max: number): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max;
-}
-
-function failLock(): never {
-  throw new PackageStageError('graph_lock_invalid');
 }
 
 function sha256(value: string): string {
