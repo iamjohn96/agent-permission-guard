@@ -17,6 +17,7 @@ import {
   SyntheticProductionProfileReviewAuthority,
   SyntheticReadOnlyArtifactApprovalAuthority,
   type ExactGraphCandidate,
+  type ExactGraphCandidateFailurePredicate,
   type ExactGraphCandidateInput,
   type ExactGraphMetadataTransport,
   type GraphMetadataResponse,
@@ -91,7 +92,20 @@ describe('exact production graph and read-only artifact acceptance foundation', 
         input.packageLock.packages.bad = record;
       }],
       ['package_record_shape_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).unexpected = true; }],
-      ['package_role_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).hasInstallScript = true; }],
+      ['package_dev_flag_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).dev = true; }],
+      ['package_optional_flag_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).optional = true; }],
+      ['package_peer_flag_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).peer = true; }],
+      ['package_dev_optional_flag_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).devOptional = true; }],
+      ['package_install_script_flag_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).hasInstallScript = true; }],
+      ['package_link_flag_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).link = true; }],
+      ['package_in_bundle_flag_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).inBundle = true; }],
+      ['package_peer_dependencies_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).peerDependencies = false; }],
+      ['package_peer_dependencies_meta_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).peerDependenciesMeta = false; }],
+      ['package_optional_dependencies_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).optionalDependencies = false; }],
+      ['package_bundle_dependencies_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).bundleDependencies = false; }],
+      ['package_bundled_dependencies_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).bundledDependencies = false; }],
+      ['package_os_selector_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).os = false; }],
+      ['package_cpu_selector_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).cpu = false; }],
       ['package_artifact_identity_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).integrity = 'sha512-not-base64'; }],
       ['dependency_specifier_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).dependencies = { dep: 'file:private' }; }],
       ['dependency_resolution_rejected', (input) => { (input.packageLock.packages['node_modules/fixture'] as LockPackage).dependencies = { dep: '1.0.0' }; }],
@@ -110,7 +124,7 @@ describe('exact production graph and read-only artifact acceptance foundation', 
       try { authority.compile(input); } catch (thrown) { error = thrown; }
       expect(error).toMatchObject({ code: 'graph_lock_invalid' });
       const failure = authority.claimFailure(error);
-      expect(failure).toEqual({ diagnosticVersion: 1, predicate });
+      expect(failure).toEqual({ diagnosticVersion: 2, predicate });
       expect(Object.isFrozen(failure)).toBe(true);
       expect(JSON.stringify(failure)).not.toContain('registry.npmjs.org');
       expect(authority.authenticatesFailure(failure)).toBe(true);
@@ -125,6 +139,26 @@ describe('exact production graph and read-only artifact acceptance foundation', 
       expect(authority.claimFailure(new Error('graph_lock_invalid'))).toBeUndefined();
       expect(new ExactGraphCandidateAuthority().authenticatesFailure(failure)).toBe(false);
     }
+  });
+
+  it('keeps false flag values allowed, rejects defined selectors, and chooses the first role failure deterministically', () => {
+    const archive = packageArchive('fixture', '1.0.0');
+    const falseFlags = candidateInput(archive);
+    Object.assign(falseFlags.packageLock.packages['node_modules/fixture']!, {
+      dev: false, optional: false, peer: false, devOptional: false, hasInstallScript: false, link: false, inBundle: false,
+    });
+    expect(new ExactGraphCandidateAuthority().compile(falseFlags).graphNodes).toHaveLength(1);
+
+    const sameRecord = candidateInput(archive);
+    Object.assign(sameRecord.packageLock.packages['node_modules/fixture']!, { dev: true, cpu: false });
+    expectCandidatePredicate(sameRecord, 'package_dev_flag_rejected');
+
+    const sortedRecords = candidateInput(archive);
+    Object.assign(sortedRecords.packageLock.packages['node_modules/fixture']!, { dev: true });
+    sortedRecords.packageLock = withPackage(sortedRecords.packageLock, 'node_modules/aaa', {
+      version: '1.0.0', resolved: 'https://registry.npmjs.org/aaa/-/aaa-1.0.0.tgz', integrity: sha512(Buffer.from('aaa')), optional: true,
+    });
+    expectCandidatePredicate(sortedRecords, 'package_optional_flag_rejected');
   });
 
   it('models Node ancestor lookup rather than accepting an arbitrary same-name dependency', () => {
@@ -356,6 +390,17 @@ function candidateInput(archive: Buffer): ExactGraphCandidateInput & { packageLo
       },
     },
   };
+}
+
+function expectCandidatePredicate(
+  input: ExactGraphCandidateInput,
+  predicate: ExactGraphCandidateFailurePredicate,
+): void {
+  const authority = new ExactGraphCandidateAuthority();
+  let thrown: unknown;
+  try { authority.compile(input); } catch (error) { thrown = error; }
+  expect(thrown).toMatchObject({ code: 'graph_lock_invalid' });
+  expect(authority.claimFailure(thrown)).toEqual({ diagnosticVersion: 2, predicate });
 }
 
 type LockPackage = Record<string, unknown> & {

@@ -77,7 +77,20 @@ export type ExactGraphCandidateFailurePredicate =
   | 'graph_size_rejected'
   | 'install_path_rejected'
   | 'package_record_shape_rejected'
-  | 'package_role_rejected'
+  | 'package_dev_flag_rejected'
+  | 'package_optional_flag_rejected'
+  | 'package_peer_flag_rejected'
+  | 'package_dev_optional_flag_rejected'
+  | 'package_install_script_flag_rejected'
+  | 'package_link_flag_rejected'
+  | 'package_in_bundle_flag_rejected'
+  | 'package_peer_dependencies_rejected'
+  | 'package_peer_dependencies_meta_rejected'
+  | 'package_optional_dependencies_rejected'
+  | 'package_bundle_dependencies_rejected'
+  | 'package_bundled_dependencies_rejected'
+  | 'package_os_selector_rejected'
+  | 'package_cpu_selector_rejected'
   | 'package_artifact_identity_rejected'
   | 'dependency_specifier_rejected'
   | 'dependency_resolution_rejected'
@@ -86,7 +99,7 @@ export type ExactGraphCandidateFailurePredicate =
 
 /** Authority-local private diagnostic. It never contains a path, URL, package name, or lock bytes. */
 export type AuthenticatedExactGraphCandidateFailure = Readonly<{
-  diagnosticVersion: 1;
+  diagnosticVersion: 2;
   predicate: ExactGraphCandidateFailurePredicate;
 }>;
 
@@ -246,7 +259,7 @@ export class ExactGraphCandidateAuthority {
   }
 
   #fail(predicate: ExactGraphCandidateFailurePredicate): never {
-    const failure = Object.freeze({ diagnosticVersion: 1 as const, predicate });
+    const failure = Object.freeze({ diagnosticVersion: 2 as const, predicate });
     const error = new PackageStageError('graph_lock_invalid');
     this.#failures.add(failure);
     this.#errors.set(error, failure);
@@ -574,13 +587,20 @@ function compileLockGraph(
       'optionalDependencies', 'bundleDependencies', 'bundledDependencies', 'hasInstallScript',
       'link', 'inBundle', 'os', 'cpu',
     ], fail, 'package_record_shape_rejected');
-    if (
-      record.dev === true || record.optional === true || record.peer === true || record.devOptional === true
-      || record.hasInstallScript === true || record.link === true || record.inBundle === true
-      || record.peerDependencies !== undefined || record.peerDependenciesMeta !== undefined
-      || record.optionalDependencies !== undefined || record.bundleDependencies !== undefined
-      || record.bundledDependencies !== undefined || record.os !== undefined || record.cpu !== undefined
-    ) fail('package_role_rejected');
+    if (record.dev === true) fail('package_dev_flag_rejected');
+    if (record.optional === true) fail('package_optional_flag_rejected');
+    if (record.peer === true) fail('package_peer_flag_rejected');
+    if (record.devOptional === true) fail('package_dev_optional_flag_rejected');
+    if (record.hasInstallScript === true) fail('package_install_script_flag_rejected');
+    if (record.link === true) fail('package_link_flag_rejected');
+    if (record.inBundle === true) fail('package_in_bundle_flag_rejected');
+    if (record.peerDependencies !== undefined) fail('package_peer_dependencies_rejected');
+    if (record.peerDependenciesMeta !== undefined) fail('package_peer_dependencies_meta_rejected');
+    if (record.optionalDependencies !== undefined) fail('package_optional_dependencies_rejected');
+    if (record.bundleDependencies !== undefined) fail('package_bundle_dependencies_rejected');
+    if (record.bundledDependencies !== undefined) fail('package_bundled_dependencies_rejected');
+    if (record.os !== undefined) fail('package_os_selector_rejected');
+    if (record.cpu !== undefined) fail('package_cpu_selector_rejected');
     if (!isExactVersion(record.version) || typeof record.resolved !== 'string' || typeof record.integrity !== 'string') {
       fail('package_artifact_identity_rejected');
     }

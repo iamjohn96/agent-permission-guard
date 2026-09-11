@@ -81,6 +81,18 @@ also passed. No real npm, Dashboard, DNS/HTTPS, live execution, product DB,
 candidate/evidence or quarantine access, dependency change, commit or push occurred. See
 `docs/graph-genesis-candidate-compiler-private-diagnostics-architecture-check.md`.
 
+The approved Candidate Package Role Private Subpredicate checkpoint replaces the compound private
+`package_role_rejected` vocabulary with fourteen deterministic field-level predicates and raises
+candidate diagnosticVersion to 2. Sorted install-path traversal and the prescribed field order
+select one first failure; boolean flags remain rejected only when true, while defined dependency,
+bundle and selector fields remain rejected even when false. Public `graph_lock_invalid`, strict
+compiler behavior, provenance, bounded one-time stderr, post-terminal ordering, candidate absence,
+cleanup, approval, audit/receipt/DB schemas and dependencies remain unchanged. Targeted tests
+passed 50/50 and the full network-free suite passed 331 tests with 3 conditional skips; typecheck
+and diff check also passed. No real npm, Dashboard, DNS/HTTPS, live execution, product DB,
+candidate/quarantine/evidence access, dependency change, commit or push occurred. See
+`docs/graph-genesis-candidate-package-role-private-subpredicate-architecture-check.md`.
+
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,
 durable-before-visible local

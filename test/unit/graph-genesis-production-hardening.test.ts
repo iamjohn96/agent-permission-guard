@@ -1031,7 +1031,7 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     } catch (error) { thrown = error; }
     expect(thrown).toMatchObject({ code: 'graph_lock_invalid' });
     const failure = compiler.claimFailure(thrown);
-    expect(failure).toEqual({ diagnosticVersion: 1, predicate: 'package_role_rejected' });
+    expect(failure).toEqual({ diagnosticVersion: 2, predicate: 'package_install_script_flag_rejected' });
     expect(compiler.claimFailure(thrown)).toBeUndefined();
     expect(compiler.claimFailure(new Error('graph_lock_invalid'))).toBeUndefined();
     expect(compiler.authenticatesFailure(failure)).toBe(true);
@@ -1050,7 +1050,7 @@ describe('exact real metadata-only graph genesis network-free hardening', () => 
     expect(lines).toEqual([]);
     expect(compiler.emitFailureDiagnostic(failure!, (line) => lines.push(line))).toBe(true);
     expect(compiler.emitFailureDiagnostic(failure!, () => undefined)).toBe(false);
-    expect(lines).toEqual(['[apg] graph-genesis-candidate-diagnostic {"diagnosticVersion":1,"predicate":"package_role_rejected"}\n']);
+    expect(lines).toEqual(['[apg] graph-genesis-candidate-diagnostic {"diagnosticVersion":2,"predicate":"package_install_script_flag_rejected"}\n']);
     expect(Buffer.byteLength(lines[0]!, 'utf8')).toBeLessThanOrEqual(1024);
     expect(lines[0]).not.toContain(fixture.workspace.rootRealpath);
     expect(lines[0]).not.toContain('@modelcontextprotocol');
