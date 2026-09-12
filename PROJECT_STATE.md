@@ -106,6 +106,21 @@ prior evidence/quarantine access occurred. Next work is a network-free Exact Can
 Dependency Semantics Architecture Check before source changes or v15. See
 `docs/graph-genesis-v14-live-acceptance-architecture-check.md`.
 
+The approved Exact Candidate Peer Dependency Semantics checkpoint adds an un-wired, in-memory
+evaluator and synthetic unit coverage for the documented strict peer subset. It neither reads
+lockfiles nor has candidate, approval, audit, receipt, artifact, diagnostic, process, or runtime
+authority; existing v1 peer rejection and all production wiring remain unchanged. Diff check,
+typecheck, and the focused evaluator test passed (8/8). Test-only timing hardening retained the 150ms
+hang boundary, gave only malformed/stderr startup cases 1000ms, bounded state polling at 5000ms, and
+gave only policy-update announcement/state-rotation tests 10000ms/15000ms deadlines. Archive worker
+targeted tests passed 5/5, stdio proxy targeted tests passed 28/28, and canonical `npm test` passed:
+29 files passed, 1 skipped; 339 tests passed, 3 skipped (342 total). No production source, global
+Vitest configuration, dependency, or security boundary changed. These network-free results do not
+prove live product behavior; no evaluator source/import connection was found. No real npm, Dashboard,
+DNS/HTTPS, live execution, product DB,
+candidate/evidence/quarantine access, dependency change, commit, or push occurred. See
+`docs/exact-candidate-peer-dependency-semantics-architecture-check.md`.
+
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,
 durable-before-visible local
