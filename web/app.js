@@ -53,11 +53,15 @@ function renderApprovals(requests) {
     let identity;
     if (request.graphGenesis) {
       identity = element('div', 'identity identity-adapter_action_exact');
+      const v2 = request.graphGenesis.approvalIdentityVersion === 2;
       identity.append(
-        element('strong', '', 'Identity: Exact execution envelope'),
+        element('strong', '', v2 ? 'Identity: Exact V2 execution envelope' : 'Identity: Exact execution envelope'),
         element('span', '', `Target: ${request.graphGenesis.target}`),
         element('span', '', `Registry: ${request.graphGenesis.registryOrigin}`),
-        element('span', '', 'Approval: one bounded metadata-only graph genesis run'),
+        element('span', '', v2
+          ? `Approval: V2 metadata/lock-only discovery · max ${request.graphGenesis.maxCandidateOutputs} candidate`
+          : 'Approval: one bounded metadata-only graph genesis run'),
+        ...(v2 ? [element('span', '', `V2: schema ${request.graphGenesis.candidateSchemaVersion} · peer ${request.graphGenesis.peerSemanticsVersion} · compilation ${request.graphGenesis.compilationContractVersion}`)] : []),
         element('span', '', request.graphGenesis.bypassWarning),
       );
     }

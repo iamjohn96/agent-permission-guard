@@ -2,12 +2,28 @@
 
 ## Current Milestone
 
-**Latest authority (committed `8ffd0b9`):** v14 produced a verified safe failure, not successful candidate
-acceptance. The network-free, memory-only Plan3/Projection3/Envelope2 binding foundation is implemented but
-un-wired. Fresh evidence is typecheck/build, 75/75 focused tests, and 364 passed with 3 conditional skips
-(32 files passed, 1 skipped). It changes neither live authority nor v1 production semantics, and v2
-integration remains separately approval-gated. See
-`docs/exact-candidate-v2-plan-envelope-binding-architecture-check.md`.
+**Latest authority (committed `a2a85ae`):** v14 produced a verified safe failure, not successful candidate
+acceptance. The network-free V2 production snapshot/approval/session foundation is **in progress** and remains
+un-wired. The initial raw-input implementation and its 4/4 targeted plus 368/3 suite results were rejected and
+are not acceptance evidence. A source-coherence checkpoint has removed the rejected raw session references and
+restored typecheck with 2/2 shallow dormant-bridge tests; those tests do not establish production provenance.
+The bounded production snapshot, session-preparation, and durable approval-lifecycle units are now complete. The snapshot binds 11
+authority-owned file captures, five authority-owned tree captures, the finalized workspace, owned Seatbelt
+profile, and exact host/runtime/containment relations. Its revalidation uses original authorities with abort,
+nondecreasing monotonic-time and deadline fences. The session authority authenticates a caller-owned existing
+audit DB, owns an internal approval/Dashboard channel and descriptor-bound private output intent, and derives one
+exact Plan3/Projection3/Envelope2 tuple with internal IDs, route identity, fixed launch/limits, V2 approval view
+and receipt context. Its one-shot lifecycle records hidden request, durable audit state, Dashboard publication,
+terminal outcome and approved revalidation in that order, then mints only an opaque same-authority memory-only
+seal. Its hidden request TTL is a positive safe integer bounded by the remaining monotonic plan window, so a
+late Dashboard request cannot outlive the plan. It creates no candidate or execution capability; cleanup leaves
+the caller DB and output bytes intact. Fresh evidence is typecheck, build, and 58/58 targeted tests on macOS
+using disposable real SQLite/output resources and a mocked Dashboard server boundary. One closed-API test is
+platform-independent; 57 concrete macOS tests are explicitly skipped on non-macOS CI. Independent fresh
+network-free single-worker suite evidence is 422 passed, 3 skipped across 33 passed and 1 skipped files (exit 0).
+The lifecycle foundation is technically verified but remains dormant/unwired: live authority and V1 production
+semantics remain unchanged. See
+`docs/exact-candidate-v2-production-snapshot-approval-session-wiring-architecture-check.md`.
 
 The Exact Production Graph Genesis Live Run Readiness Architecture Check was accepted on 2026-09-09. Its first
 network-free readiness foundation is committed and pushed at `7c15130`. The approved non-injectable production
@@ -626,7 +642,6 @@ un-wired evaluator/v2-design summary above supersede them as the current Graph G
 
 ## Next Recommended Task
 
-Review and separately approve the authenticated production snapshot/approval/session wiring gate for the
-implemented but dormant Plan3/Projection3/Envelope2 foundation. It must not implicitly include the later
-compiler/post-state/terminal join, Artifact2/disk consumers, or live acceptance. Those remain separate gates,
-and any future live acceptance requires a fresh exact scope and personal Dashboard decision.
+Do not advance this dormant V2 bridge automatically. A separate Architecture Check and user approval are required
+for compiler/post-state/Artifact2 composition, any broker/process/start-lease consumer, full real Dashboard or
+product-DB use, or live acceptance.
