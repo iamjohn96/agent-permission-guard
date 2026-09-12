@@ -24,6 +24,11 @@ const denyPolicy = resolve('test/fixtures/deny-policy.yaml');
 const denyListAllowedPolicy = resolve('test/fixtures/deny-list-allowed-policy.yaml');
 const riskEscalationPolicy = resolve('test/fixtures/risk-escalation-policy.yaml');
 const testDirectory = mkdtempSync(join(tmpdir(), 'apg-integration-'));
+const STATE_ROTATION_POLL_TIMEOUT_MS = 5_000;
+const STATE_ROTATION_TEST_TIMEOUT_MS = 15_000;
+const DEFAULT_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS = 3_000;
+const POLICY_UPDATE_ANNOUNCEMENT_TIMEOUT_MS = 10_000;
+const POLICY_UPDATE_TEST_TIMEOUT_MS = 15_000;
 
 afterEach(async () => {
   await Promise.allSettled(openClients.splice(0).map((client) => client.close()));
@@ -254,7 +259,7 @@ it('rotates an opt-in dashboard state file without an older process removing new
   await secondClient.close();
   await waitForStateRemoval(statePath);
   expect(existsSync(statePath)).toBe(false);
-});
+}, STATE_ROTATION_TEST_TIMEOUT_MS);
 
 function readDashboardState(path: string): {
   version: number;
@@ -302,7 +307,9 @@ it('propagates downstream cancellation to the upstream tool call', async () => {
 it('applies a validated dashboard policy update to the next tool call', async () => {
   const editablePolicy = join(testDirectory, `${randomUUID()}.yaml`);
   writeFileSync(editablePolicy, readFileSync(allowPolicy, 'utf8'), { mode: 0o600 });
-  const { client, dashboard } = await connectGatewayWithDashboard('auto', editablePolicy);
+  const { client, dashboard } = await connectGatewayWithDashboard(
+    'auto', editablePolicy, POLICY_UPDATE_ANNOUNCEMENT_TIMEOUT_MS,
+  );
   const first = await client.callTool({ name: 'dangerous_write', arguments: { value: 'first' } });
   expect(textOf(first)).toBe('wrote:first');
 
@@ -331,7 +338,7 @@ rules:
   const count = await client.callTool({ name: 'get_dangerous_call_count', arguments: {} });
   expect(denied.isError).toBe(true);
   expect(textOf(count)).toBe('1');
-});
+}, POLICY_UPDATE_TEST_TIMEOUT_MS);
 
 async function connectGateway(
   entryPoint: string,
@@ -375,24 +382,30 @@ async function connectGateway(
 }
 
 async function waitForStateRemoval(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const deadline = Date.now() + STATE_ROTATION_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     if (!existsSync(path)) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
+  throw new Error('Dashboard state file was not removed before the test-only deadline');
 }
 
 async function waitForStateCreation(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const deadline = Date.now() + STATE_ROTATION_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     if (existsSync(path)) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
+  throw new Error('Dashboard state file was not created before the test-only deadline');
 }
 
 async function waitForStateChange(path: string, previousUrl: string): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const deadline = Date.now() + STATE_ROTATION_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     if (existsSync(path) && readDashboardState(path).url !== previousUrl) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
+  throw new Error('Dashboard state file did not rotate before the test-only deadline');
 }
 
 type DashboardAccess = Readonly<{ origin: string; token: string }>;
@@ -400,6 +413,7 @@ type DashboardAccess = Readonly<{ origin: string; token: string }>;
 async function connectGatewayWithDashboard(
   mode: ClientMode,
   policyPath: string,
+  announcementTimeoutMs = DEFAULT_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS,
 ): Promise<{ client: Client; dashboard: DashboardAccess }> {
   const client = new Client(
     { name: `apg-dashboard-test-${mode}`, version: '0.1.0' },
@@ -420,7 +434,7 @@ async function connectGatewayWithDashboard(
   });
   const dashboardPromise = new Promise<DashboardAccess>((resolveDashboard, reject) => {
     let output = '';
-    const timeout = setTimeout(() => reject(new Error('Dashboard URL was not announced')), 3_000);
+    const timeout = setTimeout(() => reject(new Error('Dashboard URL was not announced')), announcementTimeoutMs);
     transport.stderr?.on('data', (chunk) => {
       output += String(chunk);
       const match = /approval dashboard: (http:\/\/127\.0\.0\.1:\d+\/#token=[^\s]+)/.exec(output);

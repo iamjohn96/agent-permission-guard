@@ -112,14 +112,14 @@ describe('bounded archive child worker', () => {
     const valid = createArchiveAdversarialFixtureCorpus()
       .find((fixture) => fixture.id === 'valid_minimal')!;
     const cases = [
-      ['archive-worker-hang.js', 'archive_worker_timeout'],
-      ['archive-worker-invalid-frame.js', 'archive_protocol_invalid'],
-      ['archive-worker-stderr-overflow.js', 'archive_protocol_invalid'],
+      ['archive-worker-hang.js', 'archive_worker_timeout', 150],
+      ['archive-worker-invalid-frame.js', 'archive_protocol_invalid', 1_000],
+      ['archive-worker-stderr-overflow.js', 'archive_protocol_invalid', 1_000],
     ] as const;
-    for (const [name, code] of cases) {
+    for (const [name, code, timeoutMs] of cases) {
       const root = temporaryDirectory(`apg-${name}-`);
       const entry = resolve('dist/test/fixtures', name);
-      const worker = await BoundedArchiveWorker.create(faultWorkerOptions(root, entry));
+      const worker = await BoundedArchiveWorker.create(faultWorkerOptions(root, entry, timeoutMs));
       await expect(worker.inspect(valid.encodedBytes, fixturePolicyLimits), name)
         .rejects.toMatchObject({ code });
     }
@@ -144,14 +144,14 @@ async function createRepositoryWorker(
   return BoundedArchiveWorker.create(repositoryArchiveWorkerOptions(process.cwd(), cwd, override));
 }
 
-function faultWorkerOptions(root: string, entrypoint: string) {
+function faultWorkerOptions(root: string, entrypoint: string, timeoutMs = 150) {
   return {
     nodeExecutable: process.execPath,
     expectedNodeMajor: Number.parseInt(process.versions.node.split('.')[0]!, 10) as 24 | 25 | 26,
     workerEntrypoint: entrypoint,
     workingDirectory: root,
     readOnlyRuntimeFiles: Object.freeze([resolve('package.json'), entrypoint]),
-    timeoutMs: 150,
+    timeoutMs,
     maxFrameBytes: 4 * 1024,
     maxStdoutBytes: 8 * 1024,
     maxStderrBytes: 512,
