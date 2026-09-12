@@ -147,6 +147,91 @@ describe('pure peer dependency semantics', () => {
     expect(predicate(withRange(Array(10).fill('1.0.0').join(' || ')))).toBe('specifier');
     expect(predicate(withRange(Array(17).fill('1.0.0').join(' ')))).toBe('budget');
     expect(predicate(withRange('^9007199254740991.0.0'))).toBe('specifier');
-    for (const range of [' 1.0.0', '1.0.0 ', '1.0.0 || ', '1.0.0  1.0.0']) expect(predicate(withRange(range))).toBe('specifier');
+    for (const range of [' 1.0.0', '1.0.0 ', '1.0.0 || ']) expect(predicate(withRange(range))).toBe('specifier');
+    expect(analyzePeerDependencySemantics(withRange('1.0.0  1.0.0')).requiredPaths).toHaveLength(1);
+  });
+
+  it('examines every reachable peer node once despite lexical insertion order', () => {
+    const nodes = [
+      node('node_modules/z', 'z', '1.0.0', { peerDependencies: { a: '1.0.0' } }),
+      node('node_modules/a', 'a', '1.0.0', { peer: true, peerDependencies: { missing: '1.0.0' } }),
+    ];
+    expect(predicate(input(nodes, { z: '1.0.0' }))).toBe('peer_missing');
+    expect(predicate(input([...nodes].reverse(), { z: '1.0.0' }))).toBe('peer_missing');
+    const complete = input([
+      node('node_modules/z', 'z', '1.0.0', { peerDependencies: { a: '1.0.0' } }),
+      node('node_modules/a', 'a', '1.0.0', { peer: true }),
+    ], { z: '1.0.0' });
+    const requirements = analyzePeerDependencySemantics(complete).peerRequirements;
+    expect(requirements).toEqual([{ from: 'node_modules/z', name: 'a', optional: false, targetPath: 'node_modules/a' }]);
+    expect(new Set(requirements.map(({ from, name }) => `${from}\0${name}`)).size).toBe(requirements.length);
+    const conflicting = [
+      node('node_modules/z', 'z', '1.0.0', { peerDependencies: { a: '1.0.0' } }),
+      node('node_modules/a', 'a', '1.0.0', { peer: true, peerDependencies: { host: '^2.0.0' } }),
+      node('node_modules/host', 'host', '1.0.0'),
+    ];
+    expect(predicate(input(conflicting, { z: '1.0.0', host: '1.0.0' }))).toBe('peer_conflict');
+    expect(predicate(input([...conflicting].reverse(), { z: '1.0.0', host: '1.0.0' }))).toBe('peer_conflict');
+  });
+
+  it('closes required peers through their ordinary dependencies but not optional peers', () => {
+    const required = input([
+      node('node_modules/a', 'a', '1.0.0', { peerDependencies: { b: '1.0.0' } }),
+      node('node_modules/b', 'b', '1.0.0', { peer: true, dependencies: { c: '1.0.0' } }),
+      node('node_modules/c', 'c', '1.0.0', { peer: true }),
+    ], { a: '1.0.0' });
+    expect(analyzePeerDependencySemantics(required).requiredPaths).toEqual([
+      'node_modules/a', 'node_modules/b', 'node_modules/c',
+    ]);
+    const optional = input([
+      node('node_modules/a', 'a', '1.0.0', { peerDependencies: { b: '1.0.0' }, peerDependenciesMeta: { b: { optional: true } } }),
+      node('node_modules/b', 'b', '1.0.0'),
+    ], { a: '1.0.0' });
+    expect(predicate(optional)).toBe('closure');
+    const peerSubgraphCycle = input([
+      node('node_modules/a', 'a', '1.0.0', { peerDependencies: { b: '1.0.0' } }),
+      node('node_modules/b', 'b', '1.0.0', { peer: true, dependencies: { c: '1.0.0' } }),
+      node('node_modules/c', 'c', '1.0.0', { peer: true, dependencies: { b: '1.0.0' } }),
+    ], { a: '1.0.0' });
+    expect(predicate(peerSubgraphCycle)).toBe('ordinary_cycle');
+  });
+
+  it('enforces the exact global combined ordinary-and-peer requirement boundary', () => {
+    const dense = (count: number): PeerSemanticsInput => {
+      const names = Array.from({ length: count }, (_, index) => `n${String(index).padStart(3, '0')}`);
+      return input(names.map((name, index) => node(`node_modules/${name}`, name, '1.0.0', {
+        dependencies: Object.fromEntries(names.slice(index + 1).map((target) => [target, '1.0.0'])),
+      })), { [names[0]!]: '1.0.0' });
+    };
+    expect(analyzePeerDependencySemantics(dense(91)).requiredPaths).toHaveLength(91);
+    expect(predicate(dense(92))).toBe('budget');
+    const combinedPlusOne = dense(91);
+    (combinedPlusOne.nodes as Array<Record<string, unknown>>)[90]!.peerDependencies = { absent: '1.0.0' };
+    (combinedPlusOne.nodes as Array<Record<string, unknown>>)[90]!.peerDependenciesMeta = { absent: { optional: true } };
+    expect(predicate(combinedPlusOne)).toBe('budget');
+    const peerGrid = (count: number): PeerSemanticsInput => {
+      const names = Array.from({ length: count }, (_, index) => `p${String(index).padStart(2, '0')}`);
+      return input(names.map((name) => {
+        const peers = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`absent${index}`, '1.0.0']));
+        const meta = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`absent${index}`, { optional: true }]));
+        return node(`node_modules/${name}`, name, '1.0.0', { peerDependencies: peers, peerDependenciesMeta: meta });
+      }), Object.fromEntries(names.map((name) => [name, '1.0.0'])));
+    };
+    expect(analyzePeerDependencySemantics(peerGrid(32)).peerRequirements).toHaveLength(2_048);
+    expect(predicate(peerGrid(33))).toBe('budget');
+    const globalPeerPlusOne = peerGrid(32);
+    (globalPeerPlusOne.nodes as unknown[]).push(node('node_modules/p32', 'p32', '1.0.0', {
+      peerDependencies: { absent: '1.0.0' }, peerDependenciesMeta: { absent: { optional: true } },
+    }));
+    (globalPeerPlusOne.rootDependencies as Record<string, string>).p32 = '1.0.0';
+    expect(predicate(globalPeerPlusOne)).toBe('budget');
+    expect(predicate(input([
+      node('node_modules/a', 'a', '1.0.0', {
+        peerDependencies: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`absent${index}`, '1.0.0'])),
+      }),
+    ], { a: '1.0.0' }))).toBe('budget');
+    expect(predicate(input([], Object.fromEntries(
+      Array.from({ length: 4_097 }, (_, index) => [`root${index}`, '1.0.0']),
+    )))).toBe('budget');
   });
 });

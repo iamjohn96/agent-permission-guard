@@ -2,6 +2,11 @@
 
 ## Current Milestone
 
+**Latest authority (base `4080e64`):** v14 produced a verified safe failure, not successful candidate
+acceptance. The current uncommitted work is the network-free, un-wired peer evaluator foundation correction
+and v2 integration design review; canonical regression is 342 passed, 3 skipped. It changes neither live
+authority nor v1 production semantics, and v2 integration remains separately approval-gated.
+
 The Exact Production Graph Genesis Live Run Readiness Architecture Check was accepted on 2026-09-09. Its first
 network-free readiness foundation is committed and pushed at `7c15130`. The approved non-injectable production
 owner and synthetic full-flow are committed and pushed at `592b286`: the exact CLI now hands off to one
@@ -120,6 +125,26 @@ prove live product behavior; no evaluator source/import connection was found. No
 DNS/HTTPS, live execution, product DB,
 candidate/evidence/quarantine access, dependency change, commit, or push occurred. See
 `docs/exact-candidate-peer-dependency-semantics-architecture-check.md`.
+
+The historical v7 terminal-classification and other earlier current-state entries remain historical evidence.
+The current follow-up pure evaluator correction processes each reachable peer once, closes required peers
+through ordinary dependencies, accepts the approved one-or-more-U+0020 grammar, counts slash-delimited path
+segments, and rejects global combined requirements before range parse/traversal. Its synthetic regressions
+cover lexical/input ordering, missing/conflicting peers, required-peer ordinary closure, ordinary peer-subgraph
+cycle, and exact/+1 combined/global/per-node budgets. The approved memory-only v2 authority now accepts only
+explicit v1-compatible metadata plus `packageLock: unknown`, retains exact artifact/runtime/security identity
+and raw dependency/peer/meta/peer-role presence, and derives edges and tagged peer outcomes through the shared
+evaluator. The canonical memory codec rejects noncanonical bytes and duplicate keys at every depth, then
+reconstructs and recompiles retained declarations before accepting a digest. A self-consistent alternate valid
+payload remains decodable plain evidence, but it authenticates under neither its original compiler authority nor
+any other authority; malformed or recomputed-inconsistent evidence is rejected. Typecheck and 22/22 focused tests
+passed. The canonical build/full network-free suite passed 31 files with 1 skipped and 353 tests with 3 conditional
+skips (356 total); diff check passed. The foundation
+remains un-wired and changes no v1 production integration, identity/schema, approval, audit, candidate, or live
+behavior. No Graph Genesis npm child, package resolution/install, registry/network, Dashboard, live execution,
+product DB, real candidate/evidence/quarantine access, dependency change, commit, or push occurred. The v2 design
+and memory-only foundation are prepared; see
+`docs/exact-candidate-peer-semantics-v2-integration-architecture-check.md`.
 
 The prior Production Graph Genesis Approval & Execution Composition Architecture Check was accepted on
 2026-09-08 and its foundation was committed and pushed at `6108936`. It provides exact execution envelope,
@@ -332,14 +357,17 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## In Progress
 
+The following early composition checkpoints are historical. The latest v14 safe failure and current
+un-wired evaluator/v2-design summary above supersede them as the current Graph Genesis status.
+
 - The pre-spawn cancellation classification correction is committed and pushed at `31fd835`: an approved
   action cancelled before spawn and before any external read returns `not_started`/exit 2, while quarantine,
   terminal ambiguity, spawn and external-read outcomes retain their conservative classifications.
 - A disposable first live command attempt expired before approval and produced no external read, npm,
   candidate or package effect. The local uncommitted liveness correction drains the disarmed broker listener
   before Dashboard teardown on denial, expiry or cancellation.
-- The public CLI is connected locally, but the production function has never been invoked. One exact live
-  acceptance remains a separate approval for named paths plus a personal Dashboard `Approve once` decision.
+- Historical early-composition note: the public CLI was locally connected before later v14 safe-failure
+  evidence. Any new live acceptance remains a separate approval for named paths plus Dashboard decision.
 - The execution envelope directly binds the owner-captured comprehensive runtime-manifest digest as well as
   the exact plan/projection, Dashboard instance, policy,
   persistent audit sink, candidate output, limits and deadlines. The closed preflight hash is never reused.
@@ -360,8 +388,8 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Remaining
 
-- Review, commit and push the production-owner checkpoint, then separately authorize one exact production
-  Graph Genesis live acceptance using an existing private APG audit DB and absent private candidate path.
+- Historical production-owner commit/live-acceptance checkpoint; superseded as current work by the peer v2
+  design gate above. Any future live action still requires its own exact approval.
 - Decide whether to accept the POSIX-only preview or design a Windows runner separately.
 - Separately approve a production graph profile, registry confirmation, target artifact download/stage
   creation, receipt 1.2, and package startup.
@@ -414,8 +442,8 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Known Issues
 
-- The production Graph Genesis owner has not yet been exercised. Its exact macOS/Node/npm/runtime-path checks
-  may fail closed during the first acceptance; there is intentionally no fallback path or version widening.
+- Historical pre-v14 note: later v14 produced a safe failure rather than a successful candidate acceptance.
+  Exact macOS/Node/npm/runtime-path checks still fail closed with no fallback or version widening.
 - APG verifies the captured runtime files and containment observations, not the complete OS, kernel, dynamic
   libraries or system trust store.
 - A post-spawn failure before authenticated post-state leaves the bounded private temporary root quarantined.
@@ -481,7 +509,8 @@ stage, receipt/database change, or staged package startup has occurred in the cu
   action/envelope-scoped Dashboard approval and audit, exclusive state handoff, WAL/FULL/integrity/sidecar
   durability identity, immediate bounded Graph audit, `output_overflow` incomplete receipt evidence,
   candidate final readback/parent fsync and read-only DB-backed terminal proof.
-- Current full network-free regression: 290 passed, 3 skipped on 2026-09-09. Build, typecheck and whitespace
+- Historical 2026-09-09 full network-free regression: 290 passed, 3 skipped. Current authority is the
+  342 passed, 3 skipped result in the latest milestone summary. Build, typecheck and whitespace
   checks passed. No product DB, public DNS/registry, npm/npx, real candidate/state output, package download,
   installation, package code, dependency/migration, credential/config read, publish or push occurred.
 - Production Graph Genesis composition focused coverage: 10 tests for static no-network/no-real-spawn wiring,
@@ -568,8 +597,8 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 
 ## Current Risks
 
-- The non-injectable production owner is locally composed but has never been invoked. The first live action
-  remains separately approval-gated and must use a fresh exact plan plus a personal Dashboard decision.
+- Historical composition note: later v14 was a safe failure, not successful candidate acceptance. Any future
+  live action remains separately approval-gated with a fresh exact plan and personal Dashboard decision.
 - Terminal Outcome Receipt detail, action/envelope-scoped Dashboard data, DB durability identity, final
   candidate readback/parent fsync and read-only terminal proof are composed by that owner, but have not been
   evidenced by a real action.
@@ -586,14 +615,14 @@ stage, receipt/database change, or staged package startup has occurred in the cu
 - Post-execution audit failure cannot undo a completed local side effect.
 - Automatic rollback cannot reliably reverse lifecycle scripts, child processes, cache changes, or external requests.
 - Native clients must invalidate in-flight work on state rotation; server-side instance matching cannot cancel stale client responses by itself.
-- The supervisor and broker now reject missing, copied, expired, replayed or phase-reused start leases, and
-  the listener reports zero-outstanding handler/socket drain. These foundations have only synthetic execution
-  evidence; the real run remains separately approval-gated and has not been invoked.
+- The supervisor and broker reject missing, copied, expired, replayed or phase-reused start leases, and the
+  listener reports zero-outstanding handler/socket drain. Later v14 evidence is a safe failure only; any new
+  real run remains separately approval-gated.
 - Candidate receipts and audit chains remain portable unsigned local evidence. A local DB owner can recompute
   history, same-user races remain possible, and public metadata disclosure cannot be rolled back.
 
 ## Next Recommended Task
 
-Review the uncommitted v7 terminal-classification and post-state diagnostic checkpoint, then seek separate
-commit/push approval. The non-injectable production owner and synthetic full-flow are committed at `592b286`; any
-live acceptance remains a later exact command plus the user's fresh Dashboard decision.
+Review and separately approve the next plan-v3/envelope-v2, disk terminal-proof, and fail-closed consumer
+compatibility architecture gate. The completed memory-only Candidate Peer Semantics v2 authority/codec remains
+un-wired; any production integration or live acceptance requires a later exact scope and fresh Dashboard decision.

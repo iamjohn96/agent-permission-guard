@@ -80,13 +80,26 @@ export function analyzePeerDependencySemantics(input: PeerSemanticsInput): PeerS
   const rawNodes = inputRecord.nodes;
   if (!Array.isArray(rawNodes)) fail('shape');
   if (rawNodes.length > MAX_NODES) fail('budget');
-  const rootDependencies = stringMap(root, 'shape');
-  for (const name of rootDependencies.keys()) packageName(name);
-  const nodes = new Map<string, Node>();
   const shallow = rawNodes.map((raw) => {
     const record = ownRecord(raw, 'shape');
     return { record, path: boundedString(record.installPath, 'shape') };
-  }).sort((a, b) => compareText(a.path, b.path));
+  });
+  let peerCount = 0;
+  let requirementCount = Object.keys(root).length;
+  if (requirementCount > MAX_COMBINED) fail('budget');
+  for (const { record } of shallow) {
+    const dependencies = record.dependencies === undefined ? undefined : ownRecord(record.dependencies, 'shape');
+    const peers = record.peerDependencies === undefined ? undefined : ownRecord(record.peerDependencies, 'peer_shape');
+    const peerKeys = peers === undefined ? 0 : Object.keys(peers).length;
+    if (peerKeys > MAX_PEERS_PER_NODE) fail('budget');
+    peerCount += peerKeys;
+    requirementCount += (dependencies === undefined ? 0 : Object.keys(dependencies).length) + peerKeys;
+    if (peerCount > MAX_PEERS || requirementCount > MAX_COMBINED) fail('budget');
+  }
+  const rootDependencies = stringMap(root, 'shape');
+  for (const name of rootDependencies.keys()) packageName(name);
+  const nodes = new Map<string, Node>();
+  shallow.sort((a, b) => compareText(a.path, b.path));
   for (const { record } of shallow) {
     const node = parseNode(record);
     if (nodes.has(node.path)) fail('shape');
@@ -97,10 +110,6 @@ export function analyzePeerDependencySemantics(input: PeerSemanticsInput): PeerS
     const parent = parentPath(node.path);
     if (parent !== undefined && parent !== '' && !nodes.has(parent)) fail('shape');
   }
-  let peerCount = 0;
-  for (const node of orderedNodes) peerCount += node.peers.size;
-  if (peerCount > MAX_PEERS || peerCount + nodes.size > MAX_COMBINED) fail('budget');
-
   const parsedRootRanges = new Map<string, Range>();
   const parsedNodeRanges = new Map<string, Map<string, Range>>();
   const parsedPeerRanges = new Map<string, Map<string, Range>>();
@@ -132,11 +141,22 @@ export function analyzePeerDependencySemantics(input: PeerSemanticsInput): PeerS
 
   const production = closure(rootTargets.values(), ordinaryTargets);
   assertOrdinaryDag(production, ordinaryTargets);
-  const required = new Set(production);
+  const required = new Set<Node>();
+  const processedPeers = new Set<Node>();
   const outcomes: PeerRequirementOutcome[] = [];
-  const queue = [...production].sort(byPath);
-  for (let index = 0; index < queue.length; index += 1) {
-    const node = queue[index]!;
+  const queue: Node[] = [];
+  const includeRequired = (node: Node): void => {
+    if (required.has(node)) return;
+    required.add(node);
+    queue.push(node);
+    for (const target of ordinaryTargets.get(node.path)?.values() ?? []) includeRequired(target);
+  };
+  for (const node of production) includeRequired(node);
+  while (queue.length > 0) {
+    queue.sort(byPath);
+    const node = queue.shift()!;
+    if (processedPeers.has(node)) continue;
+    processedPeers.add(node);
     for (const [name, peer] of sorted(node.peers)) {
       if (name === node.name) fail('self_peer');
       const local = nodes.get(childPath(node.path, name));
@@ -150,11 +170,7 @@ export function analyzePeerDependencySemantics(input: PeerSemanticsInput): PeerS
       if (target.path === node.path) fail('self_peer');
       if (!satisfies(target.version, parsedPeerRanges.get(node.path)!.get(name)!)) fail('peer_conflict');
       outcomes.push(Object.freeze({ from: node.path, name, optional: peer.optional, targetPath: target.path }));
-      if (!peer.optional && !required.has(target)) {
-        required.add(target);
-        queue.push(target);
-        queue.sort(byPath);
-      }
+      if (!peer.optional) includeRequired(target);
     }
   }
   assertOrdinaryDag(required, ordinaryTargets);
@@ -256,7 +272,7 @@ function parentPath(path: string): string | undefined {
   return match ? match[1]! : undefined;
 }
 function validPath(path: string): boolean { return path === '' || /^(node_modules\/(?:@[^/]+\/)?[^/]+)(\/node_modules\/(?:@[^/]+\/)?[^/]+)*$/.test(path); }
-function depth(path: string): number { return path === '' ? 0 : path.split('/node_modules/').length - 1; }
+function depth(path: string): number { return path === '' ? 0 : path.split('/').length; }
 function byPath(a: Node, b: Node): number { return compareText(a.path, b.path); }
 function sorted<T>(map: Map<string, T>): Array<[string, T]> { return [...map.entries()].sort(([a], [b]) => compareText(a, b)); }
 function compareText(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
@@ -300,13 +316,12 @@ function parseVersion(value: string): Version {
 function parseRange(value: string): Range {
   if (Buffer.byteLength(value) > MAX_STRING_BYTES || value.length === 0 || value.trim() !== value || /[^\x20-\x7e]/.test(value)) fail('specifier');
   if (value === '*') return [[]];
-  const branches = value.split(/ ?\|\| ?/);
+  const branches = value.split(/ *\|\| */);
   if (branches.length > MAX_BRANCHES || branches.some((branch) => branch.length === 0 || branch.includes('||'))) fail('specifier');
   let atoms = 0; let comparisons = 0;
   const parsed = branches.map((branch) => {
-    if (branch.includes('  ')) fail('specifier');
     const branchComparisons: Comparison[] = [];
-    for (const atom of branch.split(' ')) {
+    for (const atom of branch.split(/ +/)) {
       atoms += 1;
       if (atoms > MAX_ATOMS) fail('budget');
       const match = /^(=|<=|>=|<|>|\^|~)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(atom);
