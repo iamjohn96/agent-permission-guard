@@ -2,10 +2,12 @@
 
 ## Current Milestone
 
-**Latest authority (base `4080e64`):** v14 produced a verified safe failure, not successful candidate
-acceptance. The current uncommitted work is the network-free, un-wired peer evaluator foundation correction
-and v2 integration design review; canonical regression is 342 passed, 3 skipped. It changes neither live
-authority nor v1 production semantics, and v2 integration remains separately approval-gated.
+**Latest authority (committed `8ffd0b9`):** v14 produced a verified safe failure, not successful candidate
+acceptance. The network-free, memory-only Plan3/Projection3/Envelope2 binding foundation is implemented but
+un-wired. Fresh evidence is typecheck/build, 75/75 focused tests, and 364 passed with 3 conditional skips
+(32 files passed, 1 skipped). It changes neither live authority nor v1 production semantics, and v2
+integration remains separately approval-gated. See
+`docs/exact-candidate-v2-plan-envelope-binding-architecture-check.md`.
 
 The Exact Production Graph Genesis Live Run Readiness Architecture Check was accepted on 2026-09-09. Its first
 network-free readiness foundation is committed and pushed at `7c15130`. The approved non-injectable production
@@ -509,8 +511,9 @@ un-wired evaluator/v2-design summary above supersede them as the current Graph G
   action/envelope-scoped Dashboard approval and audit, exclusive state handoff, WAL/FULL/integrity/sidecar
   durability identity, immediate bounded Graph audit, `output_overflow` incomplete receipt evidence,
   candidate final readback/parent fsync and read-only DB-backed terminal proof.
-- Historical 2026-09-09 full network-free regression: 290 passed, 3 skipped. Current authority is the
-  342 passed, 3 skipped result in the latest milestone summary. Build, typecheck and whitespace
+- Historical 2026-09-09 full network-free regression: 290 passed, 3 skipped. The later 342 passed, 3 skipped
+  result is historical; the current committed v2 foundation evidence is 353 passed, 3 conditional skips.
+  Build, typecheck and whitespace
   checks passed. No product DB, public DNS/registry, npm/npx, real candidate/state output, package download,
   installation, package code, dependency/migration, credential/config read, publish or push occurred.
 - Production Graph Genesis composition focused coverage: 10 tests for static no-network/no-real-spawn wiring,
@@ -519,7 +522,7 @@ un-wired evaluator/v2-design summary above supersede them as the current Graph G
   without migration plus copied/substituted handle and chain-tail drift rejection, one-owner fake
   transport/inert-child abort composition, exclusive identity-bound candidate
   output with descriptor-based terminal-proof import, and post-state inventory cleanup/quarantine.
-- Current network-free full regression: 278 passed, 3 skipped on 2026-09-08 with one worker. Build, typecheck,
+- Historical network-free full regression: 278 passed, 3 skipped on 2026-09-08 with one worker. Build, typecheck,
   and whitespace validation passed. No public DNS/registry, npm/npx, product DB, real candidate output, package
   download, installation, package code, publish, push, or credential/config read occurred.
 - Final network-free full regression: 263 passed, 3 skipped on 2026-09-08. The subsequently added compiled
@@ -623,6 +626,7 @@ un-wired evaluator/v2-design summary above supersede them as the current Graph G
 
 ## Next Recommended Task
 
-Review and separately approve the next plan-v3/envelope-v2, disk terminal-proof, and fail-closed consumer
-compatibility architecture gate. The completed memory-only Candidate Peer Semantics v2 authority/codec remains
-un-wired; any production integration or live acceptance requires a later exact scope and fresh Dashboard decision.
+Review and separately approve the authenticated production snapshot/approval/session wiring gate for the
+implemented but dormant Plan3/Projection3/Envelope2 foundation. It must not implicitly include the later
+compiler/post-state/terminal join, Artifact2/disk consumers, or live acceptance. Those remain separate gates,
+and any future live acceptance requires a fresh exact scope and personal Dashboard decision.
