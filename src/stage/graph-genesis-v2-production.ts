@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { constants, existsSync } from 'node:fs';
+import { constants, existsSync, lstatSync, realpathSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
@@ -7,11 +7,13 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { LocalApprovalService } from '../approval/service.js';
 import type { ApprovalOutcome, ApprovalTicket } from '../approval/types.js';
 import { AuditQueryService } from '../audit/query-service.js';
-import { SqliteAuditRecorder, type AuditCall } from '../audit/recorder.js';
-import type { ReceiptContext } from '../audit/receipt.js';
+import { SqliteAuditRecorder, type AuditCall, type GraphGenesisExecutionSummary } from '../audit/recorder.js';
+import { AuthorizationReceiptSchema, OutcomeReceiptSchema, receiptDigest, type ReceiptContext } from '../audit/receipt.js';
 import { canonicalJson } from '../audit/canonical-json.js';
 import {
   authenticatesExistingGraphGenesisAuditDatabase,
+  openAuditDatabaseReadOnly,
+  type AuditDatabase,
   revalidatesExistingGraphGenesisAuditDatabase,
   type ExistingGraphGenesisAuditDatabase,
 } from '../db/database.js';
@@ -28,6 +30,16 @@ import type { SeatbeltLoopbackProfile } from './graph-genesis-containment.js';
 import { SeatbeltLoopbackContainmentAuthority } from './graph-genesis-containment.js';
 import { GRAPH_GENESIS_POLICY } from './graph-genesis-composition.js';
 import { ExactGraphCandidateV2Authority, PEER_SEMANTICS_V2_CONTRACT } from './exact-production-graph-v2.js';
+import {
+  createGraphGenesisCandidateArtifactV2,
+  decodeGraphGenesisCandidateArtifactV2,
+  encodeGraphGenesisCandidateArtifactV2,
+  syntheticUnavailableEvidenceV2,
+  type GraphGenesisCandidateArtifactV2,
+  type GraphGenesisCandidateArtifactV2Binding,
+} from './graph-genesis-candidate-artifact-v2.js';
+import { SyntheticPostStateV2Authority, type SyntheticPostStateV2 } from './graph-genesis-v2-post-state.js';
+import { parseStrictJsonDocument } from './graph-genesis-broker.js';
 import {
   COMPILATION_CONTRACT_DIGEST,
   EXACT_COMPILATION_CONTRACT_V1,
@@ -195,6 +207,7 @@ type OwnedPreparedProduction = Readonly<{
 
 type OwnedSealedAuthorization = Readonly<{
   sealed: AuthenticatedGraphGenesisV2SealedAuthorization;
+  audit: AuditCall;
   prepared: PreparedGraphGenesisV2Production;
   context: AuthenticatedGraphGenesisV2SessionContext;
   output: AuthenticatedGraphGenesisV2OutputIntent;
@@ -202,6 +215,7 @@ type OwnedSealedAuthorization = Readonly<{
   approvalId: string;
   startByMonotonicMs: number;
   executionDeadlineMonotonicMs: number;
+  callerSignal?: AbortSignal;
 }>;
 
 type AuditCheckpoint = Readonly<{
@@ -232,7 +246,410 @@ type OwnedOutputIntent = Readonly<{
   parentIdentityDigest: string;
   canonicalPathDigest: string;
   descriptor: FileHandle;
+  controller: AbortController;
 }>;
+
+type SyntheticQuiescedRunV2 = Readonly<{ actionId: string; approvalId: string; planHash: string; executionEnvelopeHash: string }>;
+type SyntheticArtifactOutputV2 = Readonly<{ artifactDigest: string; outputDigest: string }>;
+
+const COMPLETION_OWNER = Symbol('session-owned-synthetic-completion');
+type CompletionProof = Readonly<{ actionId: string; artifactDigest: string; evidenceOrigin: 'synthetic_fixture'; terminalStatus: 'incomplete_external_read' }>;
+type ProofRow = Record<string, unknown>;
+type OwnedEvent = Readonly<{ type: string; details: unknown }>;
+
+/** No exported constructor, runtime raw fields, caller-selected DB or injected proof. */
+class SessionOwnedSyntheticCompletion {
+  readonly #sealed: OwnedSealedAuthorization;
+  readonly #context: OwnedSessionContext;
+  readonly #output: OwnedOutputIntent;
+  readonly #workspace: GraphGenesisWorkspace;
+  readonly #candidates: ExactGraphCandidateV2Authority;
+  readonly #active: () => boolean;
+  readonly #parentIdentity: string;
+  readonly #initialEvents: readonly ProofRow[];
+  readonly #initialCall: ProofRow;
+  readonly #initialApproval: ProofRow;
+  readonly #journal: OwnedEvent[] = [];
+  readonly #dispose: Array<() => void> = [];
+  readonly #runs = new WeakSet<object>();
+  readonly #artifacts = new WeakMap<object, Readonly<{run: SyntheticQuiescedRunV2; state: SyntheticPostStateV2}>>();
+  readonly #reservations = new WeakMap<object, SyntheticQuiescedRunV2>();
+  readonly #outputs = new WeakMap<object, GraphGenesisCandidateArtifactV2>();
+  readonly #postStates = new SyntheticPostStateV2Authority();
+  #runValue: SyntheticQuiescedRunV2 | undefined;
+  #lastNow: number | undefined;
+  #phase: 'new' | 'issued' | 'captured' | 'compiled' | 'reserved' | 'written' | 'terminal' = 'new';
+  #busy = false;
+  #started = false;
+  #writtenIdentity: string | undefined;
+  #terminalAttempted = false;
+  #proofAttempted = false;
+  #terminalEvents: readonly ProofRow[] | undefined;
+  #terminalProofState: 'unattempted' | 'proven' | 'unknown' = 'unattempted';
+
+  constructor(token: symbol, sealed: OwnedSealedAuthorization, context: OwnedSessionContext,
+    output: OwnedOutputIntent, workspace: GraphGenesisWorkspace, candidates: ExactGraphCandidateV2Authority,
+    active: () => boolean) {
+    if (token !== COMPLETION_OWNER) fail();
+    this.#sealed = sealed; this.#context = context; this.#output = output;
+    this.#workspace = workspace; this.#candidates = candidates; this.#active = active;
+    this.#parentIdentity = proofIdentity(lstatSync(dirname(context.source.canonicalPath)));
+    this.#checkSourcePath();
+    // Snapshot the already durable owner-created authorization, not caller-supplied rows.
+    this.#initialEvents = boundedProofEvents(context.source.database).filter((row) => row.tool_call_id === sealed.actionId);
+    this.#initialCall = boundedProofRow(context.source.database, 'tool_calls', sealed.actionId);
+    this.#initialApproval = boundedProofRow(context.source.database, 'approvals', sealed.approvalId);
+    if (this.#initialEvents.length !== 8) fail();
+    for (const signal of [context.controller.signal, output.controller.signal, sealed.callerSignal]) {
+      if (signal === undefined) continue;
+      const revoke = () => this.#failure();
+      signal.addEventListener('abort', revoke, { once: true });
+      this.#dispose.push(() => signal.removeEventListener('abort', revoke));
+    }
+    Object.freeze(this);
+  }
+
+  issueSyntheticQuiescedRun(now: () => number): SyntheticQuiescedRunV2 {
+    return this.#sync(() => {
+      this.#fence(now); if (this.#phase !== 'new') fail();
+      const run = Object.freeze({ actionId: this.#sealed.actionId, approvalId: this.#sealed.approvalId,
+        planHash: this.#sealed.prepared.plan.planHash, executionEnvelopeHash: this.#sealed.prepared.envelope.executionEnvelopeHash });
+      // The single owner also handles a throw after a possibly committed start.
+      this.#started = true;
+      this.#sealed.audit.markExecutionStarted();
+      this.#append('graph_genesis_v2_synthetic_quiesced_fixture', {
+        evidenceOrigin: 'synthetic_fixture', planHash: run.planHash, executionEnvelopeHash: run.executionEnvelopeHash,
+        unavailableEvidence: syntheticUnavailableEvidenceV2(run.actionId),
+      });
+      this.#runs.add(run); this.#runValue = run; this.#phase = 'issued';
+      return run;
+    });
+  }
+
+  async captureSyntheticPostState(run: SyntheticQuiescedRunV2, now: () => number): Promise<SyntheticPostStateV2> {
+    return this.#async(async () => {
+      this.#run(run, now); if (this.#phase !== 'issued') fail();
+      const state = await this.#postStates.capture({ evidenceOrigin: 'synthetic_fixture', ...run,
+        workspaceBinding: this.#sealed.prepared.plan.workspaceBinding, workspace: this.#workspace,
+        checkpoint: () => this.#run(run, now) });
+      this.#run(run, now);
+      this.#append('graph_genesis_v2_post_state_validated', { evidenceOrigin: 'synthetic_fixture', postStateDigest: state.postStateDigest });
+      this.#phase = 'captured'; return state;
+    });
+  }
+
+  compileSyntheticArtifact(run: SyntheticQuiescedRunV2, state: SyntheticPostStateV2, now: () => number): GraphGenesisCandidateArtifactV2 {
+    return this.#sync(() => {
+      this.#run(run, now);
+      if (this.#phase !== 'captured' || !this.#postStates.matches(state, run)) fail();
+      const candidate = this.#postStates.compileCandidate(state, this.#candidates, this.#sealed.prepared.plan.compilationContract);
+      if (!this.#candidates.authenticates(candidate)) fail();
+      const artifact = createGraphGenesisCandidateArtifactV2({ evidenceOrigin: 'synthetic_fixture', candidate, binding: this.#binding(run, state) });
+      this.#append('graph_genesis_v2_candidate_compiled', { evidenceOrigin: 'synthetic_fixture', candidateDigest: candidate.candidateDigest, postStateDigest: state.postStateDigest });
+      this.#artifacts.set(artifact, { run, state }); this.#phase = 'compiled'; return artifact;
+    });
+  }
+
+  async reserveOutput(run: SyntheticQuiescedRunV2, now: () => number): Promise<object> {
+    return this.#async(async () => {
+      this.#run(run, now); if (this.#phase !== 'compiled') fail();
+      await this.#parent(run, now);
+      await assertAbsentV2(this.#output.canonicalPath); this.#run(run, now);
+      this.#append('graph_genesis_v2_candidate_output_intent', { evidenceOrigin: 'synthetic_fixture',
+        outputCanonicalPathDigest: this.#sealed.prepared.envelope.outputCanonicalPathDigest });
+      const reservation = Object.freeze({ reservationVersion: 2 as const });
+      this.#reservations.set(reservation, run); this.#phase = 'reserved'; return reservation;
+    });
+  }
+
+  async writeReservedArtifact(run: SyntheticQuiescedRunV2, reservation: object, artifact: GraphGenesisCandidateArtifactV2, now: () => number): Promise<SyntheticArtifactOutputV2> {
+    return this.#async(async () => {
+      this.#run(run, now);
+      const owned = this.#artifacts.get(artifact);
+      if (this.#phase !== 'reserved' || this.#reservations.get(reservation) !== run || owned?.run !== run) fail();
+      this.#reservations.delete(reservation);
+      await this.#postStates.revalidate(owned.state, () => this.#run(run, now)); this.#run(run, now);
+      await this.#parent(run, now);
+      await assertAbsentV2(this.#output.canonicalPath); this.#run(run, now);
+      const bytes = encodeGraphGenesisCandidateArtifactV2(artifact);
+      let file: FileHandle | undefined;
+      try {
+        file = await open(this.#output.canonicalPath, constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_RDWR, 0o600);
+        this.#run(run, now);
+        await this.#parent(run, now);
+        const write = await file.write(bytes, 0, bytes.byteLength, 0); this.#run(run, now);
+        if (write.bytesWritten !== bytes.byteLength) fail();
+        await file.sync(); this.#run(run, now);
+        const info = await file.stat(); this.#run(run, now);
+        if (!info.isFile() || info.nlink !== 1 || info.uid !== currentUserV2(info.uid) || (Number(info.mode) & 0o7777) !== 0o600 || info.size !== bytes.byteLength) fail();
+        const buffer = Buffer.alloc(bytes.byteLength + 1);
+        const read = await file.read(buffer, 0, buffer.byteLength, 0); this.#run(run, now);
+        if (read.bytesRead !== bytes.byteLength || !buffer.subarray(0, bytes.byteLength).equals(Buffer.from(bytes))) fail();
+        if (decodeGraphGenesisCandidateArtifactV2(buffer.subarray(0, read.bytesRead)).artifactDigest !== artifact.artifactDigest) fail();
+        const after = await file.stat(); this.#run(run, now);
+        const linked = await lstat(this.#output.canonicalPath); this.#run(run, now);
+        if (!sameV2File(info, after) || !sameV2File(info, linked)) fail();
+        this.#writtenIdentity = proofFileIdentity(after);
+        await this.#output.descriptor.sync(); this.#run(run, now);
+        await this.#parent(run, now);
+        await this.#postStates.revalidate(owned.state, () => this.#run(run, now)); this.#run(run, now);
+      } finally { if (file !== undefined) await file.close(); }
+      this.#run(run, now);
+      const result = Object.freeze({ artifactDigest: artifact.artifactDigest, outputDigest: createHash('sha256').update(bytes).digest('hex') });
+      // Never issue an output capability before the output event is durable.
+      this.#append('graph_genesis_v2_candidate_output_written', { evidenceOrigin: 'synthetic_fixture', artifactDigest: artifact.artifactDigest, outputDigest: result.outputDigest });
+      this.#outputs.set(result, artifact); this.#phase = 'written'; return result;
+    });
+  }
+
+  finalizeSyntheticIncomplete(run: SyntheticQuiescedRunV2, output: SyntheticArtifactOutputV2, now: () => number): CompletionProof {
+    return this.#sync(() => {
+      this.#run(run, now);
+      const artifact = this.#outputs.get(output);
+      if (this.#phase !== 'written' || artifact === undefined || this.#artifacts.get(artifact)?.run !== run) fail();
+      this.#verifyOutput(artifact);
+      this.#run(run, now);
+      const proof = this.#terminal('incomplete_external_read', artifact);
+      if (proof === undefined) fail();
+      return proof;
+    });
+  }
+
+  async #parent(run: SyntheticQuiescedRunV2, now: () => number): Promise<void> {
+    this.#run(run, now);
+    const descriptor = await this.#output.descriptor.stat(); this.#run(run, now);
+    const linked = await lstat(this.#output.parentCanonicalPath); this.#run(run, now);
+    const canonical = await realpath(this.#output.parentCanonicalPath); this.#run(run, now);
+    if (canonical !== this.#output.parentCanonicalPath || !descriptor.isDirectory() || !linked.isDirectory()
+      || linked.isSymbolicLink() || descriptor.dev !== this.#output.parentDevice || descriptor.ino !== this.#output.parentInode
+      || descriptor.uid !== this.#output.parentOwner || (descriptor.mode & 0o7777) !== this.#output.parentMode
+      || descriptor.dev !== linked.dev || descriptor.ino !== linked.ino || descriptor.uid !== linked.uid
+      || (linked.mode & 0o7777) !== this.#output.parentMode) fail();
+  }
+
+  #sync<T>(operation: () => T): T {
+    if (this.#terminalAttempted) fail();
+    if (this.#busy) { this.#failure(); fail(); }
+    this.#busy = true;
+    try { return operation(); } catch (error) { this.#failure(); throw error; } finally { this.#busy = false; }
+  }
+  async #async<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.#terminalAttempted) fail();
+    if (this.#busy) { this.#failure(); fail(); }
+    this.#busy = true;
+    try { return await operation(); } catch (error) { this.#failure(); throw error; } finally { this.#busy = false; }
+  }
+  #failure(): void {
+    if (!this.#started || this.#terminalAttempted) return;
+    // Preserve-only: a partially created file is an orphan, never retried or promoted.
+    try { this.#terminal('failed'); } catch { /* terminal/proof remains unknown; no fallback writer */ }
+  }
+  #append(type: string, details: unknown): void {
+    this.#sealed.audit.appendEvidence(type, details);
+    this.#journal.push(Object.freeze({ type, details: parseStrictJsonDocument(canonicalJson(details)) }));
+  }
+  #terminal(status: 'failed' | 'incomplete_external_read', artifact?: GraphGenesisCandidateArtifactV2): CompletionProof | undefined {
+    if (this.#terminalAttempted) fail();
+    this.#terminalAttempted = true; this.#phase = 'terminal';
+    for (const dispose of this.#dispose.splice(0)) dispose();
+    const summary: GraphGenesisExecutionSummary = {
+      metadata: { externalReadStatus: status === 'failed' ? 'not_started' : 'incomplete', requestCount: 0, uniquePackageCount: 0, responseBytes: 0 },
+      process: { status: 'failed', exitCode: null, stdoutBytes: 0, stderrBytes: 0 },
+      ...(artifact === undefined ? {} : { candidate: { lockDigest: 'sha256:' + artifact.binding.lockBytesDigest, candidateDigest: 'sha256:' + artifact.candidate.candidateDigest, artifactDigest: 'sha256:' + artifact.artifactDigest } }),
+      cleanup: { status: 'incomplete' }, terminalAudit: { status: 'unknown' },
+      errorCode: status === 'failed' ? 'synthetic_fixture_completion_failed_preserve_only' : 'synthetic_fixture_not_production_evidence',
+    };
+    // One write attempt, then one independent reconciliation even if that write throws.
+    try { this.#sealed.audit.finalizeGraphGenesisOutcome(summary, status); } catch { /* possibly committed */ }
+    try {
+      this.#terminalEvents = boundedProofEvents(this.#context.source.database)
+        .filter((row) => row.tool_call_id === this.#sealed.actionId).slice(-3);
+    } catch { /* independent proof is still attempted; exact receipt identity remains unavailable */ }
+    try {
+      this.#prove(summary, status);
+      if (artifact !== undefined) this.#verifyOutput(artifact);
+      this.#terminalProofState = 'proven';
+      if (artifact !== undefined && status === 'incomplete_external_read') return Object.freeze({
+        actionId: this.#sealed.actionId, artifactDigest: artifact.artifactDigest, evidenceOrigin: 'synthetic_fixture', terminalStatus: status,
+      });
+      return undefined;
+    } catch { this.#terminalProofState = 'unknown'; fail(); }
+  }
+
+  #verifyOutput(artifact: GraphGenesisCandidateArtifactV2): void {
+    if (!this.#active() || this.#context.controller.signal.aborted || this.#output.controller.signal.aborted || this.#sealed.callerSignal?.aborted) fail();
+    const parent = lstatSync(this.#output.parentCanonicalPath);
+    if (!parent.isDirectory() || parent.isSymbolicLink() || realpathSync(this.#output.parentCanonicalPath) !== this.#output.parentCanonicalPath
+      || parent.dev !== this.#output.parentDevice || parent.ino !== this.#output.parentInode || parent.uid !== this.#output.parentOwner
+      || (parent.mode & 0o7777) !== this.#output.parentMode) fail();
+    const expected = Buffer.from(encodeGraphGenesisCandidateArtifactV2(artifact));
+    const fd = openSync(this.#output.canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const before = fstatSync(fd);
+      if (!before.isFile() || before.nlink !== 1 || proofFileIdentity(before) !== this.#writtenIdentity) fail();
+      const bytes = Buffer.alloc(expected.byteLength + 1); let offset = 0;
+      while (offset < bytes.byteLength) {
+        const count = readSync(fd, bytes, offset, bytes.byteLength - offset, offset);
+        if (count === 0) break; offset += count;
+      }
+      if (offset !== expected.byteLength || !bytes.subarray(0, offset).equals(expected)
+        || proofFileIdentity(fstatSync(fd)) !== this.#writtenIdentity
+        || proofFileIdentity(lstatSync(this.#output.canonicalPath)) !== this.#writtenIdentity
+        || decodeGraphGenesisCandidateArtifactV2(bytes.subarray(0, offset)).artifactDigest !== artifact.artifactDigest) fail();
+    } finally { closeSync(fd); }
+  }
+
+  #run(run: SyntheticQuiescedRunV2, now: () => number): void {
+    if (run !== this.#runValue || !this.#runs.has(run)) fail(); this.#fence(now);
+  }
+  #fence(now: () => number): void {
+    if (this.#terminalAttempted || !this.#active() || this.#context.controller.signal.aborted || this.#output.controller.signal.aborted || this.#sealed.callerSignal?.aborted) fail();
+    const value = now();
+    // The caller's clock may synchronously revoke/re-enter the owner.
+    if (this.#terminalAttempted || !this.#active() || this.#context.controller.signal.aborted || this.#output.controller.signal.aborted || this.#sealed.callerSignal?.aborted) fail();
+    if (!Number.isFinite(value) || value < 0 || value >= this.#sealed.executionDeadlineMonotonicMs
+      || (this.#phase === 'new' && value >= this.#sealed.startByMonotonicMs)
+      || (this.#lastNow !== undefined && value < this.#lastNow)) fail();
+    this.#lastNow = value;
+  }
+  #binding(run: SyntheticQuiescedRunV2, post: SyntheticPostStateV2): GraphGenesisCandidateArtifactV2Binding {
+    const plan = this.#sealed.prepared.plan; const envelope = this.#sealed.prepared.envelope;
+    const unavailable = syntheticUnavailableEvidenceV2(run.actionId);
+    return Object.freeze({ bindingVersion: 2, actionId: run.actionId, approvalId: run.approvalId, planId: plan.planId, sessionId: envelope.sessionId, planHash: plan.planHash, executionEnvelopeHash: envelope.executionEnvelopeHash, projectionDigest: envelope.projectionDigest, semanticContractDigest: plan.semanticContractDigest, compilationContractDigest: plan.compilationContractDigest, runtimeManifestDigest: plan.runtimeManifestDigest, workspaceBinding: plan.workspaceBinding, lockBytesDigest: post.lockBytesDigest, lockDocumentDigest: post.lockDocumentDigest, postStateDigest: post.postStateDigest, inventoryDigest: post.inventoryDigest, brokerLedgerDigest: unavailable.brokerLedgerDigest, processResultDigest: unavailable.processResultDigest, listenerDrainDigest: unavailable.listenerDrainDigest, hostEvidenceDigest: plan.hostEvidenceDigest, containmentProfileDigest: plan.containmentProfileDigest, containmentEvidenceDigest: plan.containmentEvidenceDigest, policyDigest: envelope.policyDigest, auditFileIdentityDigest: envelope.auditFileIdentityDigest, auditDurabilityProfileDigest: envelope.auditDurabilityProfileDigest, outputCanonicalPathDigest: envelope.outputCanonicalPathDigest, outputParentIdentityDigest: envelope.outputParentIdentityDigest });
+  }
+  #checkSourcePath(): void {
+    const source = this.#context.source;
+    const file = lstatSync(source.canonicalPath); const parent = lstatSync(dirname(source.canonicalPath));
+    if (realpathSync(source.canonicalPath) !== source.canonicalPath || !file.isFile() || file.isSymbolicLink()
+      || file.nlink !== 1 || proofIdentity(file) !== source.fileIdentityDigest || !parent.isDirectory()
+      || parent.isSymbolicLink() || proofIdentity(parent) !== this.#parentIdentity) fail();
+  }
+  #prove(summary: GraphGenesisExecutionSummary, status: 'failed' | 'incomplete_external_read'): void {
+    if (this.#proofAttempted) fail();
+    this.#proofAttempted = true;
+    this.#checkSourcePath();
+    const db = openAuditDatabaseReadOnly(this.#context.source.canonicalPath);
+    try {
+      if (!db.readonly || db === this.#context.source.database || db.pragma('query_only', { simple: true }) !== 1) fail();
+      db.transaction(() => {
+        this.#checkSourcePath();
+        const schemaBytes = db.prepare("SELECT coalesce(sum(length(CAST(sql AS BLOB))),0) AS bytes FROM sqlite_schema WHERE type='table' AND name IN ('approvals','audit_events','schema_migrations','tool_calls')").get() as { bytes: number };
+        if (schemaBytes.bytes > 512 * 1024 || db.prepare('SELECT count(*) FROM schema_migrations').pluck().get() !== 2) fail();
+        const tables = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type='table' AND name IN ('approvals','audit_events','schema_migrations','tool_calls') ORDER BY name").all();
+        if (digest({ migrations: [1, 2], tables }) !== this.#context.source.schemaDigest) fail();
+        const migrations = db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all();
+        if (canonicalJson(migrations) !== '[1,2]') fail();
+        const events = boundedProofEvents(db);
+        let tail = '0'.repeat(64); let sequence = 0;
+        const ids = new Set<string>();
+        for (const row of events) {
+          const event = proofRecord(proofJson(row.event_json));
+          if (typeof row.sequence !== 'number' || !Number.isSafeInteger(row.sequence) || row.sequence <= sequence || typeof row.event_id !== 'string'
+            || ids.has(row.event_id) || canonicalJson(Object.keys(event).sort()) !== canonicalJson(['createdAt','details','eventId','eventType','toolCallId'].sort())
+            || event.eventId !== row.event_id || event.eventType !== row.event_type || event.toolCallId !== row.tool_call_id
+            || event.createdAt !== row.created_at || canonicalJson(event) !== row.event_json || row.previous_hash !== tail
+            || row.event_hash !== createHash('sha256').update(tail + '\n' + String(row.event_json)).digest('hex')) fail();
+          ids.add(row.event_id); sequence = row.sequence; tail = String(row.event_hash);
+        }
+        const own = events.filter((row) => row.tool_call_id === this.#sealed.actionId);
+        const prefix = ['decision_recorded','graph_genesis_v2_session_created','approval_requested','approval_approved',
+          'graph_genesis_v2_approved_revalidation_complete','authorization_receipt_finalized','graph_genesis_authorization_ready','graph_genesis_v2_authorization_finalized'];
+        const types = [...prefix, 'execution_start_recorded', ...this.#journal.map((entry) => entry.type),
+          'graph_genesis_incomplete','execution_completed','outcome_receipt_finalized'];
+        if (own.length > 1024 || canonicalJson(own.map((row) => row.event_type)) !== canonicalJson(types)
+          || canonicalJson(own.slice(0, 8)) !== canonicalJson(this.#initialEvents)
+          || this.#terminalEvents === undefined || canonicalJson(own.slice(-3)) !== canonicalJson(this.#terminalEvents)) fail();
+        const details = own.map((row) => proofRecord(proofRecord(proofJson(row.event_json)).details));
+        for (let i = 0; i < this.#journal.length; i += 1) {
+          if (canonicalJson(details[9 + i]) !== canonicalJson(this.#journal[i]!.details)) fail();
+        }
+        const authDetails = details[5]!;
+        const auth = AuthorizationReceiptSchema.parse(authDetails.receipt);
+        const receiptContext = this.#sealed.prepared.receipt;
+        const expectedAction = { id: this.#sealed.actionId, adapter: receiptContext.adapter,
+          adapterVersion: receiptContext.adapterVersion, operation: receiptContext.operation,
+          identityAssurance: receiptContext.identityAssurance,
+          intentDigest: 'sha256:' + digest({ format: 'apg-portable-intent-v1', adapter: receiptContext.adapter,
+            adapterVersion: receiptContext.adapterVersion, operation: receiptContext.operation, material: receiptContext.identityMaterial }),
+          subject: receiptContext.subject, executionPlanHash: receiptContext.executionPlanHash };
+        if (canonicalJson(auth.action) !== canonicalJson(expectedAction) || auth.schema.minorVersion !== 2
+          || auth.coverage.boundary !== 'graph_genesis_plan' || auth.authorization.status !== 'authorized'
+          || canonicalJson(auth.policy) !== canonicalJson({ ...receiptContext.policy, matchedRuleId: 'graph_genesis_builtin_ask_v2' })
+          || canonicalJson(auth.decision) !== canonicalJson({ base: 'ask', effective: 'ask', reasonCodes: [...GRAPH_GENESIS_POLICY.reasonCodes], riskScore: GRAPH_GENESIS_POLICY.score, riskBand: GRAPH_GENESIS_POLICY.band })
+          || authDetails.receiptDigest !== receiptDigest(auth) || details[8]!.receiptDigest !== receiptDigest(auth)) fail();
+        const approval = boundedProofRow(db, 'approvals', this.#sealed.approvalId);
+        if (canonicalJson(approval) !== canonicalJson(this.#initialApproval) || approval.status !== 'approved'
+          || approval.tool_call_id !== this.#sealed.actionId || auth.approval.requestId !== approval.id
+          || !auth.approval.required || auth.approval.outcome !== 'approved'
+          || auth.approval.principalAssurance !== 'local_dashboard_session'
+          || auth.approval.requestedAt !== approval.requested_at || auth.approval.decidedAt !== approval.decided_at
+          || auth.approval.expiresAt !== approval.expires_at) fail();
+        const call = boundedProofRow(db, 'tool_calls', this.#sealed.actionId);
+        for (const key of Object.keys(this.#initialCall).filter((key) => !['status','completed_at','latency_ms','result_summary_json','error_code'].includes(key))) {
+          if (canonicalJson(call[key]) !== canonicalJson(this.#initialCall[key])) fail();
+        }
+        const args = { executionEnvelopeHash: this.#sealed.prepared.envelope.executionEnvelopeHash, planHash: this.#sealed.prepared.plan.planHash };
+        if (call.status !== status || call.server_id !== 'apg-graph-genesis' || call.tool_name !== 'filesystem_metadata_graph'
+          || call.arguments_json !== canonicalJson(args) || call.request_hash !== digest({ serverId: call.server_id, toolName: call.tool_name, arguments: args })
+          || call.result_summary_json !== canonicalJson(summary) || call.error_code !== summary.errorCode) fail();
+        const terminal = details[details.length - 3]!;
+        const executed = details[details.length - 2]!;
+        const outcomeDetails = details[details.length - 1]!;
+        const outcome = OutcomeReceiptSchema.parse(outcomeDetails.receipt);
+        const expectedObserved = { kind: 'graph_genesis', isError: true, externalReadStatus: summary.metadata.externalReadStatus,
+          metadataRequestCount: 0, metadataUniquePackageCount: 0, metadataResponseBytes: 0,
+          executionStatus: 'failed', exitCode: null, stdoutBytes: 0, stderrBytes: 0,
+          ...(summary.candidate === undefined ? {} : { lockDigest: summary.candidate.lockDigest,
+            candidateDigest: summary.candidate.candidateDigest, candidateArtifactDigest: summary.candidate.artifactDigest }),
+          cleanupStatus: 'incomplete', terminalAuditStatus: 'unknown', errorCode: summary.errorCode };
+        if (canonicalJson(executed) !== canonicalJson(summary) || outcome.schema.minorVersion !== 2
+          || canonicalJson(outcome.action) !== canonicalJson(auth.action) || canonicalJson(outcome.coverage) !== canonicalJson(auth.coverage)
+          || outcome.authorizationReceiptDigest !== receiptDigest(auth) || outcomeDetails.receiptDigest !== receiptDigest(outcome)
+          || outcome.execution.terminalStatus !== status || outcome.execution.completedAt !== call.completed_at
+          || outcome.receipt.issuedAt !== call.completed_at
+          || outcome.execution.startedAt < auth.receipt.issuedAt || outcome.execution.startedAt > String(own[8]!.created_at)
+          || canonicalJson(outcome.execution.observedResult) !== canonicalJson(expectedObserved)
+          || terminal.executionPlanHash !== args.executionEnvelopeHash || terminal.terminalStatus !== status
+          || terminal.outcomeReceiptDigest !== receiptDigest(outcome)) fail();
+        this.#checkSourcePath();
+      })();
+      this.#checkSourcePath();
+    } finally { db.close(); }
+  }
+}
+
+function proofIdentity(info: ReturnType<typeof lstatSync>): string {
+  if (info === undefined) fail();
+  return digest({ device: info.dev, inode: info.ino, owner: info.uid, mode: Number(info.mode) & 0o7777 });
+}
+function proofFileIdentity(info: ReturnType<typeof lstatSync>): string {
+  if (info === undefined) fail();
+  return digest({ identity: proofIdentity(info), size: info.size, nlink: info.nlink, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs });
+}
+function proofRecord(value: unknown): ProofRow {
+  if (!object(value) || Array.isArray(value)) fail(); return value as ProofRow;
+}
+function proofJson(value: unknown): unknown {
+  if (typeof value !== 'string' || Buffer.byteLength(value) > 512 * 1024) fail();
+  return parseStrictJsonDocument(value);
+}
+function boundedProofEvents(db: AuditDatabase): ProofRow[] {
+  const count = db.prepare('SELECT count(*) FROM (SELECT 1 FROM audit_events LIMIT 16385)').pluck().get();
+  if (typeof count !== 'number' || count > 16384) fail();
+  const fields = ['event_id','tool_call_id','event_type','event_json','previous_hash','event_hash','created_at'];
+  const rowBytes = fields.map((field) => 'coalesce(length(CAST(' + field + ' AS BLOB)),0)').join('+');
+  const limits = db.prepare('SELECT count(*) AS n, coalesce(sum(' + rowBytes + '),0) AS bytes, coalesce(max(' + rowBytes + '),0) AS largest FROM audit_events').get() as { n: number; bytes: number; largest: number };
+  if (limits.n > 16384 || limits.bytes > 16 * MiB || limits.largest > 512 * 1024) fail();
+  return db.prepare('SELECT sequence,event_id,tool_call_id,event_type,event_json,previous_hash,event_hash,created_at FROM audit_events ORDER BY sequence LIMIT 16385').all() as ProofRow[];
+}
+function boundedProofRow(db: AuditDatabase, table: 'tool_calls' | 'approvals', id: string): ProofRow {
+  const columns = table === 'tool_calls'
+    ? ['id','server_id','tool_name','arguments_json','request_hash','base_decision','effective_decision','matched_rule_id','reason_codes_json','risk_signals_json','risk_band','status','started_at','completed_at','result_summary_json','error_code']
+    : ['id','tool_call_id','status','requested_at','expires_at','decided_at'];
+  const size = db.prepare('SELECT ' + columns.map((column) => 'coalesce(length(CAST(' + column + ' AS BLOB)),0)').join('+') + ' AS bytes FROM ' + table + ' WHERE id=?').get(id) as {bytes: number} | undefined;
+  if (size === undefined || size.bytes > 512 * 1024) fail();
+  return proofRecord(db.prepare('SELECT * FROM ' + table + ' WHERE id=?').get(id));
+}
 
 /** Production-only bridge: it has no raw-digest capture API. */
 export class ProductionGraphGenesisV2SnapshotAuthority {
@@ -374,8 +791,8 @@ export type GraphGenesisV2ApprovalView = Readonly<{
  * The bridge deliberately exposes no raw session factories. It authenticates a
  * caller-owned existing audit database, owns the local approval/Dashboard
  * channel and output-parent descriptor, and can mint only a same-authority
- * memory-only seal. Candidate creation and every execution consumer remain
- * unavailable.
+ * memory-only seal. Only the explicitly synthetic dormant continuation can
+ * create fixture artifacts; production execution consumers remain unavailable.
  */
 export class ProductionGraphGenesisV2SessionAuthority {
   readonly #contexts = new WeakMap<object, OwnedSessionContext>();
@@ -388,7 +805,10 @@ export class ProductionGraphGenesisV2SessionAuthority {
   readonly #usedPrepared = new WeakSet<object>();
   readonly #usedContexts = new WeakSet<object>();
   readonly #sealed = new WeakMap<object, OwnedSealedAuthorization>();
-  readonly #bindings = new GraphGenesisV2BindingAuthority(new ExactGraphCandidateV2Authority());
+  readonly #consumedSealed = new WeakSet<object>();
+  // Binding and dormant completion share this owner; no live route consumes it.
+  readonly #candidates = new ExactGraphCandidateV2Authority();
+  readonly #bindings = new GraphGenesisV2BindingAuthority(this.#candidates);
 
   constructor(private readonly snapshots: ProductionGraphGenesisV2SnapshotAuthority) {}
 
@@ -491,6 +911,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
         parentIdentityDigest,
         canonicalPathDigest: digest(requestedPath),
         descriptor,
+        controller: new AbortController(),
       });
       ownedContext.outputs.add(owned);
       this.#activeOutputPaths.add(requestedPath);
@@ -847,6 +1268,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
       const sealed = Object.freeze({ sealedAuthorizationVersion: 2 as const });
       this.#sealed.set(sealed, Object.freeze({
         sealed,
+        audit,
         prepared,
         context: owned.context,
         output: owned.output,
@@ -854,6 +1276,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
         approvalId: activeTicket.request.id,
         startByMonotonicMs,
         executionDeadlineMonotonicMs: startByMonotonicMs + EXECUTION_WINDOW_MS,
+        ...(callerSignal === undefined ? {} : { callerSignal }),
       }));
       return Object.freeze({ status: 'authorized' as const, actionId: audit.actionId, sealedAuthorization: sealed });
     } catch {
@@ -896,6 +1319,31 @@ export class ProductionGraphGenesisV2SessionAuthority {
       && this.#usedContexts.has(owned.context);
   }
 
+  /**
+   * Fixture-only dormant handoff. It consumes the exact in-memory seal once
+   * and passes no caller-selected identity, raw approval token, or database
+   * handle to the public API. Production issuers/routes remain absent.
+   */
+  createSyntheticCompletion(
+    prepared: PreparedGraphGenesisV2Production,
+    sealed: AuthenticatedGraphGenesisV2SealedAuthorization,
+  ): SessionOwnedSyntheticCompletion {
+    const owned = this.#sealed.get(sealed);
+    const preparedOwned = this.#ownedPrepared(prepared);
+    const context = owned === undefined ? undefined : this.#contexts.get(owned.context);
+    const output = owned === undefined ? undefined : this.#outputs.get(owned.output);
+    const bundle = this.#snapshotBundle(preparedOwned.snapshot);
+    if (owned === undefined || owned.prepared !== prepared || this.#consumedSealed.has(sealed)
+      || context === undefined || output === undefined || output.context !== owned.context
+      || context.controller.signal.aborted || !context.outputs.has(output)) fail();
+    this.#consumedSealed.add(sealed);
+    return new SessionOwnedSyntheticCompletion(COMPLETION_OWNER, owned, context, output, bundle.workspace, this.#candidates, () =>
+      this.#contexts.get(owned.context) === context
+      && this.#outputs.get(owned.output) === output
+      && context.outputs.has(output),
+    );
+  }
+
   async revalidateSnapshot(
     snapshot: AuthenticatedGraphGenesisV2ProductionSnapshot,
     options: GraphGenesisV2RevalidationOptions,
@@ -910,6 +1358,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
     this.#outputs.delete(output);
     this.#contexts.get(owned.context)?.outputs.delete(owned);
     this.#activeOutputPaths.delete(owned.canonicalPath);
+    owned.controller.abort();
     try {
       await owned.descriptor.close();
     } catch {
@@ -1497,6 +1946,28 @@ function digest(value: unknown): string {
 
 function digestBytes(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+async function assertAbsentV2(path: string): Promise<void> {
+  try {
+    await lstat(path);
+    fail();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+
+function sameV2File(
+  left: Awaited<ReturnType<typeof lstat>>,
+  right: Awaited<ReturnType<typeof lstat>>,
+): boolean {
+  return left.isFile() && right.isFile() && left.nlink === 1 && right.nlink === 1
+    && left.dev === right.dev && left.ino === right.ino && left.uid === right.uid
+    && (Number(left.mode) & 0o777) === (Number(right.mode) & 0o777) && left.size === right.size;
+}
+
+function currentUserV2(fallback: number): number {
+  return typeof process.geteuid === 'function' ? process.geteuid() : fallback;
 }
 
 function object(value: unknown): value is object {

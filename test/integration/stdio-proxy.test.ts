@@ -26,7 +26,8 @@ const riskEscalationPolicy = resolve('test/fixtures/risk-escalation-policy.yaml'
 const testDirectory = mkdtempSync(join(tmpdir(), 'apg-integration-'));
 const STATE_ROTATION_POLL_TIMEOUT_MS = 5_000;
 const STATE_ROTATION_TEST_TIMEOUT_MS = 15_000;
-const DEFAULT_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS = 3_000;
+const LEGACY_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS = 3_000;
+const AUTO_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS = 10_000;
 const POLICY_UPDATE_ANNOUNCEMENT_TIMEOUT_MS = 10_000;
 const POLICY_UPDATE_TEST_TIMEOUT_MS = 15_000;
 
@@ -413,7 +414,9 @@ type DashboardAccess = Readonly<{ origin: string; token: string }>;
 async function connectGatewayWithDashboard(
   mode: ClientMode,
   policyPath: string,
-  announcementTimeoutMs = DEFAULT_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS,
+  announcementTimeoutMs = mode === 'auto'
+    ? AUTO_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS
+    : LEGACY_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS,
 ): Promise<{ client: Client; dashboard: DashboardAccess }> {
   const client = new Client(
     { name: `apg-dashboard-test-${mode}`, version: '0.1.0' },

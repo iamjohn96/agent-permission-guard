@@ -1,4 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import * as auditDatabaseModule from '../../src/db/database.js';
+import { Buffer } from 'node:buffer';
 import { access, chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { performance } from 'node:perf_hooks';
@@ -36,6 +38,7 @@ import {
 import * as productionModule from '../../src/stage/graph-genesis-v2-production.js';
 import { GRAPH_GENESIS_POLICY, ProductionGraphGenesisSessionAuthority } from '../../src/stage/graph-genesis-composition.js';
 import { GRAPH_GENESIS_V2_POLICY, GRAPH_GENESIS_V2_POLICY_DIGEST } from '../../src/stage/graph-genesis-v2-binding.js';
+import { canonicalJson } from '../../src/audit/canonical-json.js';
 
 const INVALID = 'graph_genesis_v2_production_invalid';
 const describeMac = process.platform === 'darwin' ? describe : describe.skip;
@@ -306,6 +309,29 @@ async function createPreparationFixture() {
 
 type PreparationFixture = Awaited<ReturnType<typeof createPreparationFixture>>;
 
+async function completionFixture(signal?: AbortSignal) {
+  const fixture = await createPreparationFixture();
+  const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);
+  const pending = fixture.sessions.authorize(prepared, signal === undefined ? {} : { signal });
+  const request = await waitForGraphApproval(fixture);
+  dashboardApprovals(fixture).decide(request.id, 'approved');
+  const authorized = await pending;
+  if (authorized.status !== 'authorized') throw new Error('Expected authorization');
+  await writeSyntheticLock(fixture.bundle.workspace.rootRealpath);
+  const completion = fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization);
+  const run = completion.issueSyntheticQuiescedRun(() => 1);
+  return { ...fixture, prepared, authorized, completion, run };
+}
+
+async function writtenCompletionFixture() {
+  const fixture = await completionFixture();
+  const state = await fixture.completion.captureSyntheticPostState(fixture.run, () => 2);
+  const artifact = fixture.completion.compileSyntheticArtifact(fixture.run, state, () => 3);
+  const reservation = await fixture.completion.reserveOutput(fixture.run, () => 4);
+  const output = await fixture.completion.writeReservedArtifact(fixture.run, reservation, artifact, () => 5);
+  return { ...fixture, state, artifact, outputIntent: fixture.output, output };
+}
+
 function databaseCounts(fixture: PreparationFixture) {
   return Object.freeze({
     toolCalls: Number(fixture.source.database.prepare('SELECT COUNT(*) AS count FROM tool_calls').pluck().get()),
@@ -332,9 +358,24 @@ async function waitForGraphApproval(fixture: PreparationFixture) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const pending = approvals.listPending();
     if (pending.length === 1) return pending[0]!;
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('Graph approval was not published');
+}
+
+async function writeSyntheticLock(workspaceRoot: string): Promise<void> {
+  const integrity = `sha512-${Buffer.alloc(64, 9).toString('base64')}`;
+  await writeFile(join(workspaceRoot, 'package-lock.json'), canonicalJson({
+    name: 'fixture', version: '1.0.0', lockfileVersion: 3, requires: true,
+    packages: {
+      '': { name: 'fixture', version: '1.0.0', dependencies: { '@modelcontextprotocol/server-filesystem': '2026.7.10' } },
+      'node_modules/@modelcontextprotocol/server-filesystem': {
+        version: '2026.7.10',
+        resolved: 'https://registry.npmjs.org/@modelcontextprotocol/server-filesystem/-/server-filesystem-2026.7.10.tgz', integrity,
+      },
+    },
+  }), { mode: 0o600 });
+  await chmod(join(workspaceRoot, 'package-lock.json'), 0o600);
 }
 
 describe('Graph Genesis v2 closed platform-independent boundary', () => {
@@ -358,9 +399,11 @@ describe('Graph Genesis v2 closed platform-independent boundary', () => {
     ]);
     expect(Object.getOwnPropertyNames(ProductionGraphGenesisV2SessionAuthority.prototype).sort()).toEqual([
       'authenticatesPrepared', 'authenticatesSealed', 'authenticatesSnapshot', 'authorize',
-      'captureOutputIntent', 'closeContext', 'closeOutputIntent', 'constructor', 'createContext',
+      'captureOutputIntent', 'closeContext', 'closeOutputIntent', 'constructor', 'createContext', 'createSyntheticCompletion',
       'prepare', 'revalidateSnapshot',
     ]);
+    expect(Object.getOwnPropertyNames(ProductionGraphGenesisV2SessionAuthority.prototype))
+      .not.toContain('createCompletionFoundation');
     expect(snapshots.authenticates(unowned)).toBe(false);
     await expect(snapshots.revalidate(unowned, {
       monotonicNow: () => 0.5,
@@ -900,6 +943,200 @@ describeMac('Graph Genesis v2 owned session preparation (macOS synthetic Dashboa
 });
 
 describeMac('Graph Genesis v2 durable approval lifecycle (macOS disposable SQLite only)', () => {
+  it('latches a concurrent continuation error without allowing the pending operation to progress', async () => {
+    const f = await completionFixture();
+    const first = f.completion.captureSyntheticPostState(f.run, () => 2).then(() => 'resolved', () => 'rejected');
+    await expect(f.completion.captureSyntheticPostState(f.run, () => 2)).rejects.toThrow(INVALID);
+    expect(f.source.database.prepare('SELECT status FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)).toBe('failed');
+    expect(await first).toBe('rejected');
+  });
+
+  it('does not start when the clock callback revokes its output during the initial fence', async () => {
+    const f = await createPreparationFixture();
+    const prepared = await f.sessions.prepare(f.snapshot, f.context, f.output);
+    const pending = f.sessions.authorize(prepared);
+    const request = await waitForGraphApproval(f);
+    dashboardApprovals(f).decide(request.id, 'approved');
+    const authorized = await pending;
+    if (authorized.status !== 'authorized') throw new Error('Expected authorization');
+    const completion = f.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization);
+    let closing: Promise<void> | undefined;
+    expect(() => completion.issueSyntheticQuiescedRun(() => {
+      closing = f.sessions.closeOutputIntent(f.output); return 1;
+    })).toThrow(INVALID);
+    await closing;
+    expect(f.source.database.prepare("SELECT count(*) FROM audit_events WHERE event_type='execution_start_recorded'").pluck().get()).toBe(0);
+  });
+
+  it('reconciles one committed-then-thrown terminal without a second writer', async () => {
+    const begin = SqliteAuditRecorder.prototype.begin;
+    let terminals = 0;
+    vi.spyOn(SqliteAuditRecorder.prototype, 'begin').mockImplementation(function (this: SqliteAuditRecorder, ...args) {
+      const call = begin.apply(this, args);
+      return Object.freeze({ ...call, finalizeGraphGenesisOutcome: (...terminalArgs: Parameters<typeof call.finalizeGraphGenesisOutcome>) => {
+        terminals += 1;
+        call.finalizeGraphGenesisOutcome(...terminalArgs);
+        throw new Error('fixture post-commit uncertainty');
+      } });
+    });
+    const f = await writtenCompletionFixture();
+    const reopen = vi.spyOn(auditDatabaseModule, 'openAuditDatabaseReadOnly');
+    expect(f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 6)).toMatchObject({ evidenceOrigin: 'synthetic_fixture', terminalStatus: 'incomplete_external_read' });
+    expect(terminals).toBe(1);
+    expect(reopen).toHaveBeenCalledOnce();
+    expect(() => f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 7)).toThrow(INVALID);
+    expect(terminals).toBe(1);
+  });
+
+  it('owns cancellation while idle and never retries terminal recording', async () => {
+    const controller = new AbortController();
+    const f = await completionFixture(controller.signal);
+    controller.abort();
+    expect(f.source.database.prepare('SELECT status FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)).toBe('failed');
+    await expect(f.completion.captureSyntheticPostState(f.run, () => 2)).rejects.toThrow(INVALID);
+    expect(f.source.database.prepare("SELECT count(*) FROM audit_events WHERE event_type='outcome_receipt_finalized'").pluck().get()).toBe(1);
+  });
+
+  it('preserves output and never retries when the single terminal transaction is rejected', async () => {
+    const f = await writtenCompletionFixture();
+    const reopen = vi.spyOn(auditDatabaseModule, 'openAuditDatabaseReadOnly');
+    f.source.database.exec("CREATE TEMP TRIGGER reject_terminal BEFORE INSERT ON audit_events WHEN NEW.event_type='outcome_receipt_finalized' BEGIN SELECT RAISE(ABORT, 'fixture terminal failure'); END");
+    expect(() => f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 6)).toThrow(INVALID);
+    expect(reopen).toHaveBeenCalledOnce();
+    expect(f.source.database.prepare('SELECT status FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)).toBe('forwarding');
+    expect(await pathExists(f.outputPath)).toBe(true);
+    f.source.database.exec('DROP TRIGGER reject_terminal');
+    expect(() => f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 7)).toThrow(INVALID);
+    expect(reopen).toHaveBeenCalledOnce();
+    expect(f.source.database.prepare("SELECT count(*) FROM audit_events WHERE event_type='outcome_receipt_finalized'").pluck().get()).toBe(0);
+  });
+
+  it('refuses a recreated DB at the owner path, even when it has a valid independent schema', async () => {
+    const f = await writtenCompletionFixture();
+    await rename(f.source.canonicalPath, f.source.canonicalPath + '.original');
+    const replacement = openAuditDatabase(f.source.canonicalPath);
+    replacement.close();
+    const reopen = vi.spyOn(auditDatabaseModule, 'openAuditDatabaseReadOnly');
+    expect(() => f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 6)).toThrow(INVALID);
+    expect(reopen).not.toHaveBeenCalled();
+    expect(await pathExists(f.outputPath)).toBe(true);
+  });
+
+  it('does not open output after revocation at the first awaited post-state recheck', async () => {
+    const f = await completionFixture();
+    const state = await f.completion.captureSyntheticPostState(f.run, () => 2);
+    const artifact = f.completion.compileSyntheticArtifact(f.run, state, () => 3);
+    const reservation = await f.completion.reserveOutput(f.run, () => 4);
+    let ticks = 0; let closing: Promise<void> | undefined;
+    await expect(f.completion.writeReservedArtifact(f.run, reservation, artifact, () => {
+      if (++ticks === 3) closing = f.sessions.closeOutputIntent(f.output);
+      return 5;
+    })).rejects.toThrow();
+    await closing;
+    expect(await pathExists(f.outputPath)).toBe(false);
+    expect(f.source.database.prepare('SELECT status FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)).toBe('failed');
+  });
+
+  it.each(['output', 'context'] as const)('terminalizes an idle post-start completion immediately on %s revocation', async (kind) => {
+    const f = await completionFixture();
+    if (kind === 'output') await f.sessions.closeOutputIntent(f.output);
+    else await f.sessions.closeContext(f.context);
+    expect(f.source.database.prepare('SELECT status FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)).toBe('failed');
+    expect(f.source.database.prepare("SELECT count(*) FROM audit_events WHERE event_type='outcome_receipt_finalized'").pluck().get()).toBe(1);
+    await expect(f.completion.captureSyntheticPostState(f.run, () => 2)).rejects.toThrow(INVALID);
+  });
+
+  it('rejects output bytes changed after durable write without issuing a proof', async () => {
+    const f = await writtenCompletionFixture();
+    await writeFile(f.outputPath, '{}\n');
+    expect(() => f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 6)).toThrow(INVALID);
+    expect(f.source.database.prepare('SELECT status FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)).toBe('failed');
+  });
+
+  it('has no runtime raw completion fields or usable reflected constructor', async () => {
+    const f = await completionFixture();
+    expect(Object.keys(f.completion)).toEqual([]);
+    expect(() => Reflect.construct(f.completion.constructor, [Symbol('forged'), {}, {}, {}, {}, {}, () => true])).toThrow(INVALID);
+  });
+
+  it.each(['issue', 'reserve'] as const)('revokes continuation after duplicate %s rather than retrying', async (kind) => {
+    const f = await completionFixture();
+    if (kind === 'issue') expect(() => f.completion.issueSyntheticQuiescedRun(() => 2)).toThrow(INVALID);
+    else {
+      const state = await f.completion.captureSyntheticPostState(f.run, () => 2);
+      f.completion.compileSyntheticArtifact(f.run, state, () => 3);
+      await f.completion.reserveOutput(f.run, () => 4);
+      await expect(f.completion.reserveOutput(f.run, () => 5)).rejects.toThrow(INVALID);
+    }
+    expect(f.source.database.prepare('SELECT status FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)).toBe('failed');
+    expect(await pathExists(f.outputPath)).toBe(false);
+  });
+
+  it('reopens the owner-selected DB query-only and records conservative terminal facts', async () => {
+    const f = await writtenCompletionFixture();
+    const realOpen = auditDatabaseModule.openAuditDatabaseReadOnly;
+    const reopen = vi.spyOn(auditDatabaseModule, 'openAuditDatabaseReadOnly').mockImplementation((path) => {
+      expect(path).toBe(f.source.canonicalPath);
+      const db = realOpen(path);
+      expect(db).not.toBe(f.source.database);
+      expect(db.readonly).toBe(true);
+      expect(db.pragma('query_only', { simple: true })).toBe(1);
+      return db;
+    });
+    f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 6);
+    expect(reopen).toHaveBeenCalledOnce();
+    const summary = JSON.parse(String(f.source.database.prepare('SELECT result_summary_json FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)));
+    expect(summary.cleanup.status).toBe('incomplete');
+    expect(summary.terminalAudit.status).toBe('unknown');
+  });
+
+  it.each(['graph_genesis_v2_post_state_validated', 'graph_genesis_v2_candidate_compiled', 'graph_genesis_v2_candidate_output_intent', 'graph_genesis_v2_candidate_output_written'])(
+    'owns a single failure terminal after %s audit failure', async (eventType) => {
+      const f = await completionFixture();
+      f.source.database.exec(`CREATE TEMP TRIGGER reject_completion BEFORE INSERT ON audit_events WHEN NEW.event_type = '${eventType}' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END`);
+      const attempt = async () => {
+        const state = await f.completion.captureSyntheticPostState(f.run, () => 2);
+        const artifact = f.completion.compileSyntheticArtifact(f.run, state, () => 3);
+        const reservation = await f.completion.reserveOutput(f.run, () => 4);
+        await f.completion.writeReservedArtifact(f.run, reservation, artifact, () => 5);
+      };
+      await expect(attempt()).rejects.toThrow();
+      expect(f.source.database.prepare('SELECT status FROM tool_calls WHERE id=?').pluck().get(f.run.actionId)).toBe('failed');
+      expect(f.source.database.prepare("SELECT count(*) FROM audit_events WHERE event_type='outcome_receipt_finalized'").pluck().get()).toBe(1);
+      await expect(f.completion.captureSyntheticPostState(f.run, () => 6)).rejects.toThrow();
+      if (eventType === 'graph_genesis_v2_candidate_output_written') expect(await pathExists(f.outputPath)).toBe(true);
+    },
+  );
+
+  it.each(['receipt', 'order', 'duplicate', 'oversize', 'approval', 'summary'])(
+    'rejects rehashed %s tampering on the independent proof connection', async (kind) => {
+      const f = await writtenCompletionFixture();
+      const realOpen = auditDatabaseModule.openAuditDatabaseReadOnly;
+      const reopen = vi.spyOn(auditDatabaseModule, 'openAuditDatabaseReadOnly').mockImplementation((path) => {
+        const rows = f.source.database.prepare('SELECT sequence,event_json FROM audit_events ORDER BY sequence').all() as Array<{sequence:number;event_json:string}>;
+        let tail = '0'.repeat(64);
+        for (const row of rows) {
+          const event = JSON.parse(row.event_json);
+          if (kind === 'receipt' && event.eventType === 'outcome_receipt_finalized') event.details.receipt.execution.observedResult.candidateArtifactDigest = `sha256:${'0'.repeat(64)}`;
+          if (kind === 'order' && event.eventType === 'graph_genesis_v2_candidate_compiled') event.eventType = 'graph_genesis_v2_candidate_output_intent';
+          if (kind === 'duplicate' && event.eventType === 'graph_genesis_v2_post_state_validated') event.eventType = 'execution_start_recorded';
+          if (kind === 'oversize' && event.eventType === 'graph_genesis_v2_post_state_validated') event.details.padding = 'x'.repeat(512 * 1024);
+          const json = canonicalJson(event);
+          const hash = createHash('sha256').update(`${tail}\n${json}`).digest('hex');
+          f.source.database.prepare('UPDATE audit_events SET event_json=?,event_type=?,previous_hash=?,event_hash=? WHERE sequence=?').run(json,event.eventType,tail,hash,row.sequence);
+          tail = hash;
+        }
+        if (kind === 'approval') f.source.database.prepare("UPDATE approvals SET status='denied' WHERE tool_call_id=?").run(f.run.actionId);
+        if (kind === 'summary') f.source.database.prepare("UPDATE tool_calls SET result_summary_json='{}' WHERE id=?").run(f.run.actionId);
+        return realOpen(path);
+      });
+      expect(() => f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 6)).toThrow();
+      expect(reopen).toHaveBeenCalledOnce();
+      expect(() => f.completion.finalizeSyntheticIncomplete(f.run, f.output, () => 7)).toThrow();
+      expect(reopen).toHaveBeenCalledOnce();
+    },
+  );
+
   it('records before publication, finalizes one approved authorization, and mints only an opaque seal', async () => {
     const fixture = await createPreparationFixture();
     const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);
@@ -952,6 +1189,104 @@ describeMac('Graph Genesis v2 durable approval lifecycle (macOS disposable SQLit
     await fixture.sessions.closeContext(fixture.context);
     expect(fixture.sessions.authenticatesSealed(result.sealedAuthorization, prepared)).toBe(false);
     expect(fixture.source.database.prepare('SELECT 1').pluck().get()).toBe(1);
+  });
+
+  it('continues one exact sealed Plan3/Projection3/Envelope2 tuple through synthetic post-state, Artifact2, terminal audit and read-only proof', async () => {
+    const fixture = await createPreparationFixture();
+    const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);
+    const pending = fixture.sessions.authorize(prepared);
+    const request = await waitForGraphApproval(fixture);
+    expect(dashboardApprovals(fixture).decide(request.id, 'approved')).toBe('approved');
+    const authorized = await pending;
+    if (authorized.status !== 'authorized') throw new Error('Expected sealed authorization');
+    await writeSyntheticLock(fixture.bundle.workspace.rootRealpath);
+
+    const completion = fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization);
+    const run = completion.issueSyntheticQuiescedRun(() => 1);
+    const postState = await completion.captureSyntheticPostState(run, () => 2);
+    const artifact = completion.compileSyntheticArtifact(run, postState, () => 3);
+    const reservation = await completion.reserveOutput(run, () => 4);
+    const output = await completion.writeReservedArtifact(run, reservation, artifact, () => 5);
+    const proof = completion.finalizeSyntheticIncomplete(run, output, () => 6);
+
+    expect(artifact.binding.planHash).toBe(prepared.plan.planHash);
+    expect(artifact.binding.executionEnvelopeHash).toBe(prepared.envelope.executionEnvelopeHash);
+    expect(artifact.binding.postStateDigest).toBe(postState.postStateDigest);
+    expect(proof).toEqual({ actionId: authorized.actionId, artifactDigest: artifact.artifactDigest, evidenceOrigin: 'synthetic_fixture', terminalStatus: 'incomplete_external_read' });
+    expect(await readFile(fixture.outputPath, 'utf8')).toContain('artifactSchemaVersion');
+    expect(() => fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization)).toThrow(INVALID);
+  });
+
+  it('revokes a session-owned synthetic completion on context close before any forward effect', async () => {
+    const fixture = await createPreparationFixture();
+    const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);
+    const pending = fixture.sessions.authorize(prepared);
+    const request = await waitForGraphApproval(fixture);
+    expect(dashboardApprovals(fixture).decide(request.id, 'approved')).toBe('approved');
+    const authorized = await pending;
+    if (authorized.status !== 'authorized') throw new Error('Expected sealed authorization');
+    const completion = fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization);
+
+    await fixture.sessions.closeContext(fixture.context);
+    expect(() => completion.issueSyntheticQuiescedRun(() => 1)).toThrow(INVALID);
+    expect(await pathExists(fixture.outputPath)).toBe(false);
+  });
+
+  it('honors the approval caller cancellation signal after the sealed handoff', async () => {
+    const fixture = await createPreparationFixture();
+    const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);
+    const controller = new AbortController();
+    const pending = fixture.sessions.authorize(prepared, { signal: controller.signal });
+    const request = await waitForGraphApproval(fixture);
+    expect(dashboardApprovals(fixture).decide(request.id, 'approved')).toBe('approved');
+    const authorized = await pending;
+    if (authorized.status !== 'authorized') throw new Error('Expected sealed authorization');
+    const completion = fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization);
+
+    controller.abort();
+    expect(() => completion.issueSyntheticQuiescedRun(() => 1)).toThrow(INVALID);
+    expect(await pathExists(fixture.outputPath)).toBe(false);
+  });
+
+  it('revokes an already-reserved output when its owned intent closes', async () => {
+    const fixture = await createPreparationFixture();
+    const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);
+    const pending = fixture.sessions.authorize(prepared);
+    const request = await waitForGraphApproval(fixture);
+    expect(dashboardApprovals(fixture).decide(request.id, 'approved')).toBe('approved');
+    const authorized = await pending;
+    if (authorized.status !== 'authorized') throw new Error('Expected sealed authorization');
+    await writeSyntheticLock(fixture.bundle.workspace.rootRealpath);
+    const completion = fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization);
+    const run = completion.issueSyntheticQuiescedRun(() => 1);
+    const state = await completion.captureSyntheticPostState(run, () => 2);
+    const artifact = completion.compileSyntheticArtifact(run, state, () => 3);
+    const reservation = await completion.reserveOutput(run, () => 4);
+
+    await fixture.sessions.closeOutputIntent(fixture.output);
+    await expect(completion.writeReservedArtifact(run, reservation, artifact, () => 5)).rejects.toThrow(INVALID);
+    expect(await pathExists(fixture.outputPath)).toBe(false);
+  });
+
+  it('preserves a written test artifact as an orphan when terminal audit fails', async () => {
+    const fixture = await createPreparationFixture();
+    const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);
+    const pending = fixture.sessions.authorize(prepared);
+    const request = await waitForGraphApproval(fixture);
+    expect(dashboardApprovals(fixture).decide(request.id, 'approved')).toBe('approved');
+    const authorized = await pending;
+    if (authorized.status !== 'authorized') throw new Error('Expected sealed authorization');
+    await writeSyntheticLock(fixture.bundle.workspace.rootRealpath);
+    const completion = fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization);
+    const run = completion.issueSyntheticQuiescedRun(() => 1);
+    const state = await completion.captureSyntheticPostState(run, () => 2);
+    const artifact = completion.compileSyntheticArtifact(run, state, () => 3);
+    const output = await completion.writeReservedArtifact(run, await completion.reserveOutput(run, () => 4), artifact, () => 5);
+
+    fixture.source.database.close();
+    expect(() => completion.finalizeSyntheticIncomplete(run, output, () => 6)).toThrow();
+    expect(() => completion.finalizeSyntheticIncomplete(run, output, () => 7)).toThrow(INVALID);
+    expect(await readFile(fixture.outputPath, 'utf8')).toContain(artifact.artifactDigest);
   });
 
   it.each(['denied', 'cancelled'] as const)(
