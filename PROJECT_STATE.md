@@ -2,9 +2,10 @@
 
 ## Current Milestone
 
-**Latest authority (committed `254890b`):** v14 produced a verified safe failure, not successful candidate
-acceptance. The network-free V2 production snapshot/approval/session foundation is committed and technically
-verified; it remains dormant/unwired. The initial raw-input implementation and its 4/4 targeted plus 368/3 suite results were rejected and
+**Latest authority (committed `044406c`):** v14 produced a verified safe failure, not successful candidate
+acceptance. The network-free V2 production snapshot/approval/session foundation and exact Candidate V2
+compiler/post-state/Artifact2 completion foundation are committed and technically verified; they remain
+dormant/unwired. The initial raw-input implementation and its 4/4 targeted plus 368/3 suite results were rejected and
 are not acceptance evidence. A source-coherence checkpoint has removed the rejected raw session references and
 restored typecheck with 2/2 shallow dormant-bridge tests; those tests do not establish production provenance.
 The bounded production snapshot, session-preparation, and durable approval-lifecycle units are now complete. The snapshot binds 11
@@ -24,8 +25,8 @@ network-free single-worker suite evidence is 422 passed, 3 skipped across 33 pas
 The lifecycle foundation is technically verified but remains dormant/unwired: live authority and V1 production
 semantics remain unchanged. See
 `docs/exact-candidate-v2-production-snapshot-approval-session-wiring-architecture-check.md`. The
-compiler/post-state/Artifact2 Architecture Check is approved and its nine-file network-free foundation is
-implemented locally but not committed. It consumes one exact session-owned sealed authorization and carries only
+compiler/post-state/Artifact2 Architecture Check is approved and its network-free foundation is committed at
+`044406c`. It consumes one exact session-owned sealed authorization and carries only
 private Plan3/Projection3/Envelope2, AuditCall, workspace, descriptor-bound output and shared candidate authority
 through a synthetic dormant handoff. The foundation is unreachable from live routes: it does not implement or
 authorize a production issuer, broker/process/start lease, live candidate output, cleanup, durable restart proof or
@@ -51,7 +52,43 @@ acceptance claim. All changes remain within the original nine dirty files plus t
 `test/integration/stdio-proxy.test.ts` test-only hardening.
 Production activation, durable restart proof, actual cleanup and same-user atomic swap resistance remain
 unverified/out of scope. See
-`docs/exact-candidate-v2-compiler-post-state-artifact-composition-architecture-check.md`.
+`docs/exact-candidate-v2-compiler-post-state-artifact-composition-architecture-check.md`. The reviewed
+`docs/exact-candidate-v2-production-issuer-quiesced-run-composition-architecture-check.md` was documents-only at
+review time; the later direct user approval covers only its stated dormant synthetic implementation, not live wiring,
+effect, or activation authority. Its prior typecheck/build, focused 101/101, stdio 28/28, and
+465 passed/3 skipped network-free records are unchanged-source historical evidence, not evidence for that proposed
+work. Any implementation requires a new exact approval limited to its stated files and test-owned fake/inert/mocked
+resources. The subsequent approved nine-file dormant network-free execution foundation is currently uncommitted:
+it privately retains the frozen `privateExecution` object through sealing, adds only a data-only synthetic execution
+ordering model, and records durable start before fixture-only broker/child/listener quiescence. It exposes no live
+listener/process/network path and keeps Artifact2 provenance explicitly synthetic/unavailable. Fresh source evidence
+was corrected after supervisor review found start-window, listener-replay, mutable-binding, and post-drain admission
+gaps in the initial synthetic state model. The new red matrix failed in five cases before the strict phase/closed-key
+correction. Worker evidence observed 111/111 focused V2 and a full 475 passed/3 skipped, but the latter is not
+accepted final full-regression evidence after supervisor reruns. Supervisor verifies typecheck exit 0, exact focused
+V2 at 111/111, and separate binding+production+completion+execution at 119/119. The full suite is Partially Verified
+/ inconsistent: unchanged preflight cancellation failed once (while standalone passed 5/5), and unchanged stdio
+Dashboard URL/state/policy timing failed in a second full run and standalone (25/28), with unhandled-rejection
+evidence. This does not prove V2 causation or a purely environmental cause. The working hypothesis is brittle legacy
+3-second Dashboard announcement/deadline and 20-second preflight timing under slow startup/resources; lifecycle
+review is required before any code change. Earlier 106/106 and 470/3 greens are superseded and not final evidence.
+The three pre-existing V2 implementation/test work items and their prior V2 content remain preserved and are not
+production or live acceptance evidence; this `PROJECT_STATE.md` is intentionally extended under the separately
+approved test-only `Bounded Integration Test Lifecycle & Condition-based Startup` correction. That correction uses
+registered lifecycle ownership, a single monotonic deadline, immediate promise
+rejection observation, bounded redacted diagnostics, abort/reap cleanup, and case isolation for fixed local
+resources. The corrected fixture preserves the existing compiled preflight cancellation assertions in five isolated
+children (`runtime`, `workspace`, `containment`, `audit`, and `cleanup`), returning only a bounded closed projection
+after each child completes cleanup and exits. The five production-phase cases retain their exact
+darwin/arm64/Node-v26.3.1 guard while generic lifecycle cases remain cross-platform; the fixture uses a 20-second
+operation deadline under a 25-second guarded-case cap, with a deterministic cleanup-before-rejection test. Fresh
+direct typecheck/build passed; preflight lifecycle tests passed 10/10 on the exact host (no platform skips), and
+stdio proxy passed 28/28 under its JSON reporter. The final one-worker network-free suite passed 480 tests with 3
+skipped across 102 passing suites under the 30-second test limit. Earlier current-task records (the inert 3/3
+fixture, text-only stdio progress, and the 473/3 suite) are historical and superseded. This retains the prior
+inconsistent evidence in
+`docs/bounded-integration-test-lifecycle-condition-based-startup-architecture-check.md`. It changes no
+production timeout/behavior/security, V2 source, dependency, schema, live route, product DB, or external effect.
 
 The Exact Production Graph Genesis Live Run Readiness Architecture Check was accepted on 2026-09-09. Its first
 network-free readiness foundation is committed and pushed at `7c15130`. The approved non-injectable production
@@ -670,7 +707,7 @@ un-wired evaluator/v2-design summary above supersede them as the current Graph G
 
 ## Next Recommended Task
 
-Do not advance this dormant V2 bridge automatically. The synthetic compiler/post-state/Artifact2 foundation is
-implemented locally but remains unreachable from live routes. Broker/process/start-lease consumers, full real
-Dashboard or product-DB use, candidate output/cleanup effect, terminal proof, and live acceptance remain separately
-approval-gated.
+Do not advance the preserved V2 work automatically or treat it as production/live acceptance. The
+test-only lifecycle Architecture Check is complete; any further production/V2/stdio/preflight behavior change needs
+a new exact approval and independent review. Production/live wiring, network, product DB,
+candidate/evidence/quarantine access, commit, and push remain prohibited.

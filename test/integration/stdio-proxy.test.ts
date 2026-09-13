@@ -9,10 +9,11 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
 import { FILESYSTEM_LIST_ALLOWED_DIRECTORIES_PROFILE_ID } from '../../src/identity/builtin-profiles.js';
+import { BoundedTestLifecycle } from '../fixtures/preflight-cancellation-lifecycle.js';
 
 type ClientMode = 'legacy' | 'auto';
 
-const openClients: Client[] = [];
+const openClients: Array<Readonly<{ client: Client; lifecycle?: BoundedTestLifecycle }>> = [];
 const fixtureServer = resolve('dist/test/fixtures/mock-mcp-server.js');
 const exactFilesystemFixtureServer = resolve('dist/test/fixtures/exact-filesystem-mcp-server.js');
 const gatewayCli = resolve('dist/src/cli/main.js');
@@ -24,15 +25,14 @@ const denyPolicy = resolve('test/fixtures/deny-policy.yaml');
 const denyListAllowedPolicy = resolve('test/fixtures/deny-list-allowed-policy.yaml');
 const riskEscalationPolicy = resolve('test/fixtures/risk-escalation-policy.yaml');
 const testDirectory = mkdtempSync(join(tmpdir(), 'apg-integration-'));
-const STATE_ROTATION_POLL_TIMEOUT_MS = 5_000;
-const STATE_ROTATION_TEST_TIMEOUT_MS = 15_000;
-const LEGACY_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS = 3_000;
-const AUTO_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS = 10_000;
-const POLICY_UPDATE_ANNOUNCEMENT_TIMEOUT_MS = 10_000;
+const GATEWAY_CONDITION_DEADLINE_MS = 15_000;
+const STATE_ROTATION_CONDITION_DEADLINE_MS = 25_000;
+const STATE_ROTATION_TEST_TIMEOUT_MS = 30_000;
+const DASHBOARD_CONDITION_DEADLINE_MS = 10_000;
 const POLICY_UPDATE_TEST_TIMEOUT_MS = 15_000;
 
 afterEach(async () => {
-  await Promise.allSettled(openClients.splice(0).map((client) => client.close()));
+  await Promise.all(openClients.splice(0).map(({ client, lifecycle }) => lifecycle === undefined ? client.close() : lifecycle.close()));
 });
 
 afterAll(() => {
@@ -226,40 +226,45 @@ it('keeps stdout pure enough for an MCP client to connect and exchange messages'
 });
 
 it('rotates an opt-in dashboard state file without an older process removing newer state', async () => {
+  const lifecycle = new BoundedTestLifecycle(STATE_ROTATION_CONDITION_DEADLINE_MS);
   const statePath = join(testDirectory, `${randomUUID()}.dashboard.json`);
-  const firstClient = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
-  await waitForStateCreation(statePath);
-  const firstState = readDashboardState(statePath);
-  const firstUrl = new URL(firstState.url);
-  const firstToken = new URLSearchParams(firstUrl.hash.slice(1)).get('token');
+  try {
+    const firstClient = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
+    await waitForStateCreation(statePath, lifecycle);
+    const firstState = readDashboardState(statePath);
+    const firstUrl = new URL(firstState.url);
+    const firstToken = new URLSearchParams(firstUrl.hash.slice(1)).get('token');
 
-  const secondClient = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
-  await waitForStateChange(statePath, firstState.url);
-  const state = readDashboardState(statePath);
+    const secondClient = await connectGateway(gatewayCli, 'auto', allowPolicy, statePath);
+    await waitForStateChange(statePath, firstState.url, lifecycle);
+    const state = readDashboardState(statePath);
 
-  expect(state.url).not.toBe(firstState.url);
-  const stateUrl = new URL(state.url);
-  const stateToken = new URLSearchParams(stateUrl.hash.slice(1)).get('token');
-  const health = await fetch(`${stateUrl.origin}/api/health`, {
-    headers: { Authorization: `Bearer ${stateToken}` },
-  });
-  expect(health.status).toBe(200);
-  expect(await health.json()).toEqual({
-    status: 'ok', api_version: 1, instance_id: state.instance_id,
-    capabilities: ['approvals', 'audit', 'policy'],
-  });
+    expect(state.url).not.toBe(firstState.url);
+    const stateUrl = new URL(state.url);
+    const stateToken = new URLSearchParams(stateUrl.hash.slice(1)).get('token');
+    const health = await fetch(`${stateUrl.origin}/api/health`, {
+      headers: { Authorization: `Bearer ${stateToken}` },
+    });
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({
+      status: 'ok', api_version: 1, instance_id: state.instance_id,
+      capabilities: ['approvals', 'audit', 'policy'],
+    });
 
-  const staleCredential = await fetch(`${stateUrl.origin}/api/health`, {
-    headers: { Authorization: `Bearer ${firstToken}` },
-  });
-  expect(staleCredential.status).toBe(401);
+    const staleCredential = await fetch(`${stateUrl.origin}/api/health`, {
+      headers: { Authorization: `Bearer ${firstToken}` },
+    });
+    expect(staleCredential.status).toBe(401);
 
-  await firstClient.close();
-  expect(readDashboardState(statePath)).toEqual(state);
+    await firstClient.close();
+    expect(readDashboardState(statePath)).toEqual(state);
 
-  await secondClient.close();
-  await waitForStateRemoval(statePath);
-  expect(existsSync(statePath)).toBe(false);
+    await secondClient.close();
+    await waitForStateRemoval(statePath, lifecycle);
+    expect(existsSync(statePath)).toBe(false);
+  } finally {
+    await lifecycle.close();
+  }
 }, STATE_ROTATION_TEST_TIMEOUT_MS);
 
 function readDashboardState(path: string): {
@@ -308,9 +313,7 @@ it('propagates downstream cancellation to the upstream tool call', async () => {
 it('applies a validated dashboard policy update to the next tool call', async () => {
   const editablePolicy = join(testDirectory, `${randomUUID()}.yaml`);
   writeFileSync(editablePolicy, readFileSync(allowPolicy, 'utf8'), { mode: 0o600 });
-  const { client, dashboard } = await connectGatewayWithDashboard(
-    'auto', editablePolicy, POLICY_UPDATE_ANNOUNCEMENT_TIMEOUT_MS,
-  );
+  const { client, dashboard } = await connectGatewayWithDashboard('auto', editablePolicy);
   const first = await client.callTool({ name: 'dangerous_write', arguments: { value: 'first' } });
   expect(textOf(first)).toBe('wrote:first');
 
@@ -377,36 +380,35 @@ async function connectGateway(
     stderr: 'pipe',
   });
 
-  await client.connect(transport);
-  openClients.push(client);
-  return client;
+  const lifecycle = new BoundedTestLifecycle(GATEWAY_CONDITION_DEADLINE_MS);
+  lifecycle.register('gateway_client', async () => { await client.close(); });
+  try {
+    await lifecycle.wait('gateway_connect', client.connect(transport));
+    lifecycle.disarm();
+    openClients.push(Object.freeze({ client, lifecycle }));
+    return client;
+  } catch (error) {
+    await lifecycle.close();
+    throw error;
+  }
 }
 
-async function waitForStateRemoval(path: string): Promise<void> {
-  const deadline = Date.now() + STATE_ROTATION_POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (!existsSync(path)) return;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
-  }
-  throw new Error('Dashboard state file was not removed before the test-only deadline');
+async function waitForStateRemoval(path: string, lifecycle: BoundedTestLifecycle): Promise<void> {
+  await waitForCondition(lifecycle, 'state_removal', () => !existsSync(path));
 }
 
-async function waitForStateCreation(path: string): Promise<void> {
-  const deadline = Date.now() + STATE_ROTATION_POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (existsSync(path)) return;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
-  }
-  throw new Error('Dashboard state file was not created before the test-only deadline');
+async function waitForStateCreation(path: string, lifecycle: BoundedTestLifecycle): Promise<void> {
+  await waitForCondition(lifecycle, 'state_creation', () => existsSync(path));
 }
 
-async function waitForStateChange(path: string, previousUrl: string): Promise<void> {
-  const deadline = Date.now() + STATE_ROTATION_POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (existsSync(path) && readDashboardState(path).url !== previousUrl) return;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+async function waitForStateChange(path: string, previousUrl: string, lifecycle: BoundedTestLifecycle): Promise<void> {
+  await waitForCondition(lifecycle, 'state_change', () => existsSync(path) && readDashboardState(path).url !== previousUrl);
+}
+
+async function waitForCondition(lifecycle: BoundedTestLifecycle, label: string, predicate: () => boolean): Promise<void> {
+  while (!predicate()) {
+    await lifecycle.wait(label, new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 20)));
   }
-  throw new Error('Dashboard state file did not rotate before the test-only deadline');
 }
 
 type DashboardAccess = Readonly<{ origin: string; token: string }>;
@@ -414,10 +416,8 @@ type DashboardAccess = Readonly<{ origin: string; token: string }>;
 async function connectGatewayWithDashboard(
   mode: ClientMode,
   policyPath: string,
-  announcementTimeoutMs = mode === 'auto'
-    ? AUTO_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS
-    : LEGACY_DASHBOARD_ANNOUNCEMENT_TIMEOUT_MS,
 ): Promise<{ client: Client; dashboard: DashboardAccess }> {
+  const lifecycle = new BoundedTestLifecycle(DASHBOARD_CONDITION_DEADLINE_MS);
   const client = new Client(
     { name: `apg-dashboard-test-${mode}`, version: '0.1.0' },
     { versionNegotiation: { mode } },
@@ -435,23 +435,73 @@ async function connectGatewayWithDashboard(
     env: process.env.PATH === undefined ? {} : { PATH: process.env.PATH },
     stderr: 'pipe',
   });
-  const dashboardPromise = new Promise<DashboardAccess>((resolveDashboard, reject) => {
-    let output = '';
-    const timeout = setTimeout(() => reject(new Error('Dashboard URL was not announced')), announcementTimeoutMs);
-    transport.stderr?.on('data', (chunk) => {
-      output += String(chunk);
-      const match = /approval dashboard: (http:\/\/127\.0\.0\.1:\d+\/#token=[^\s]+)/.exec(output);
-      if (match?.[1] === undefined) return;
-      clearTimeout(timeout);
-      const url = new URL(match[1]);
-      const token = new URLSearchParams(url.hash.slice(1)).get('token');
-      if (token === null) return reject(new Error('Dashboard token missing'));
-      resolveDashboard({ origin: url.origin, token });
-    });
+  lifecycle.register('dashboard_client', async () => { await client.close(); });
+  let output = '';
+  let announced = false;
+  let settled = false;
+  let resolveDashboard!: (dashboard: DashboardAccess) => void;
+  let rejectDashboard!: (reason: Error) => void;
+  const dashboardPromise = new Promise<DashboardAccess>((resolveValue, rejectValue) => {
+    resolveDashboard = resolveValue;
+    rejectDashboard = rejectValue;
   });
-  await client.connect(transport);
-  openClients.push(client);
-  return { client, dashboard: await dashboardPromise };
+  const detachStderr = () => {
+    transport.stderr?.off('data', onStderr);
+    transport.stderr?.off('end', onStderrEnded);
+    transport.stderr?.off('error', onStderrError);
+  };
+  const rejectClosed = (code: string) => {
+    if (settled) return;
+    settled = true;
+    detachStderr();
+    rejectDashboard!(new Error(code));
+  };
+  const resolveClosed = (dashboard: DashboardAccess) => {
+    if (settled) return;
+    settled = true;
+    detachStderr();
+    resolveDashboard!(dashboard);
+  };
+  const onStderrEnded = () => rejectClosed('dashboard_stderr_ended_before_ready');
+  const onStderrError = () => rejectClosed('dashboard_stderr_error_before_ready');
+  const onStderr = (chunk: Buffer) => {
+    output = (output + String(chunk)).slice(-4_096);
+    let candidate: DashboardAccess | undefined;
+    for (;;) {
+      const newline = output.indexOf('\n');
+      if (newline < 0) break;
+      const line = output.slice(0, newline).replace(/\r$/u, '');
+      output = output.slice(newline + 1);
+      if (!line.includes('approval dashboard:')) continue;
+      const match = /^\[apg\] approval dashboard: (http:\/\/127\.0\.0\.1:\d+\/#token=[A-Za-z0-9_-]{43})$/u.exec(line);
+      if (match?.[1] === undefined || announced || candidate !== undefined) { rejectClosed('dashboard_announcement_invalid'); return; }
+      let url: URL;
+      try { url = new URL(match[1]); } catch { rejectClosed('dashboard_announcement_invalid'); return; }
+      const token = new URLSearchParams(url.hash.slice(1)).get('token');
+      if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.pathname !== '/' || url.search !== ''
+        || token === null || !/^[A-Za-z0-9_-]{43}$/u.test(token)) { rejectClosed('dashboard_announcement_invalid'); return; }
+      candidate = Object.freeze({ origin: url.origin, token });
+    }
+    if (candidate === undefined) return;
+    announced = true;
+    resolveClosed(candidate);
+  };
+  lifecycle.register('dashboard_stderr', async () => { detachStderr(); });
+  // Observe this promise before connect: timeout/rejection is never left unhandled while stdio negotiates.
+  const observedDashboard = lifecycle.observe('dashboard_ready', dashboardPromise);
+  transport.stderr?.on('data', onStderr);
+  transport.stderr?.once('end', onStderrEnded);
+  transport.stderr?.once('error', onStderrError);
+  try {
+    await lifecycle.wait('dashboard_connect', client.connect(transport));
+    const dashboard = await lifecycle.waitObserved('dashboard_ready', observedDashboard);
+    lifecycle.disarm();
+    openClients.push(Object.freeze({ client, lifecycle }));
+    return { client, dashboard };
+  } catch (error) {
+    await lifecycle.close();
+    throw error;
+  }
 }
 
 async function waitForApproval(dashboard: DashboardAccess): Promise<{ id: string }> {
