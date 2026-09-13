@@ -1,6 +1,151 @@
 # Current State
 
-## Current Milestone
+## Current operational summary
+
+**Checkpoint:** `9bfeddd` (`feat: add root-owned graph genesis preparation`) on `main`.
+
+Agent Permission Guard (APG) is a local TypeScript/ESM CLI. It enforces only execution deliberately routed
+through its MCP STDIO gateway or its same-repository Install Guard path. The local Dashboard and SQLite audit trail
+are part of that local boundary; direct MCP, shell, Node, npm, npx, browser, and API activity remain outside it.
+This repository does not currently claim hosted SaaS, enterprise controls, credential management, signed receipts,
+operating-system sandboxing, or automatic rollback.
+
+New work must first read `JONNYLAB_WORK_POLICY.md`, [AGENTS.md](./AGENTS.md), this state file, and current Git
+status. Current code and Git state outrank historical chat. The AGENTS provider-independent rewrite requested for
+this migration is blocked by the environment’s safety review, so existing `AGENTS.md` remains authoritative and
+unchanged; it requires a separate explicit approval boundary. This is a documentation-migration limitation, not a
+code or security-policy change.
+
+### Source navigation
+
+- `src/cli/`, `src/gateway/`, `src/transport/`, `src/policy/`, `src/risk/`, and `src/approval/` implement public
+  parsing, MCP proxying, policy/risk evaluation, and one-time local approval.
+- `src/audit/`, `src/db/`, `src/dashboard/`, `web/`, and `migrations/` hold receipt/audit, SQLite, Dashboard UI,
+  and schema assets. `src/install/` is the same-repository Install Guard path.
+- `src/stage/` contains package/archive and Graph Genesis foundations; `test/` separates unit, integration,
+  fixture, and opt-in coverage. Use an exact architecture check in `docs/` for a historical decision, rather than
+  treating a nearby source module as activation authority.
+
+### Enabled product paths
+
+- `apg proxy` is the current MCP path: versioned YAML policy, deterministic Allow/Ask/Deny, risk escalation,
+  one-time local approval, loopback Dashboard, redacted SQLite events, and a tamper-evident local hash chain.
+  In proxy mode stdout is reserved for MCP JSON-RPC.
+- `apg init`, `apg doctor`, `apg inspect`, `apg install`, and `apg receipt` are public commands. Their current
+  behavior and boundaries are in [README.md](./README.md), [docs/codex.md](./docs/codex.md),
+  [docs/npm-registry-data-flow.md](./docs/npm-registry-data-flow.md), and [docs/receipts.md](./docs/receipts.md).
+- ER1 receipts are portable **unsigned** local evidence: canonical encoding, links, and local event proofs verify,
+  but there is no issuer signature, account identity, or complete downstream-effect proof. See
+  [docs/verifiable-action-receipt-architecture-check.md](./docs/verifiable-action-receipt-architecture-check.md).
+- The explicit Exact MCP Identity profile is target-only:
+  `filesystem.list-allowed-directories.v1` for the configured `local-upstream` zero-argument operation. Other MCP
+  operations remain structural. Local upstream launch checking is not package, publisher, dependency, interpreter,
+  or runtime provenance. See [docs/exact-mcp-identity-architecture-check.md](./docs/exact-mcp-identity-architecture-check.md)
+  and [docs/upstream-provenance-v0-architecture-check.md](./docs/upstream-provenance-v0-architecture-check.md).
+
+### Install Guard and stage foundations
+
+IG0–IG3 are same-repository foundations: strict npm/npx parsing, deterministic risk/policy, one-time approval and
+audit, read-only metadata inspection, immutable plan, controlled runner, verification, and bounded redaction.
+Metadata, execution, and verification are distinct boundaries. See
+[docs/install-guard-v0-plan.md](./docs/install-guard-v0-plan.md).
+
+`apg inspect` is metadata-only: its stated contract has no tarball download, package install, approval ticket, or
+audit DB write. It can make its selected public registry metadata request. `apg install` can make a real local
+project change only after its own approval. One isolated historical acceptance installed `yaml@2.9.0` with scripts
+disabled; real `npx` execution remains unverified. Direct npm/npx bypass APG. Archive/package-stage work remains
+network-free foundation only: strict archive policy, two-pass worker/materializer design, and exact `tar@7.5.22`
+parser-only boundary; it is not a real artifact workflow, OS sandbox, or publisher-provenance claim. See
+[docs/verified-mcp-package-stage-architecture-check.md](./docs/verified-mcp-package-stage-architecture-check.md),
+[docs/archive-adapter-dependency-security-check.md](./docs/archive-adapter-dependency-security-check.md), and
+[docs/bounded-archive-worker-two-pass-materialization-architecture-check.md](./docs/bounded-archive-worker-two-pass-materialization-architecture-check.md).
+
+`package.json` declares package `0.2.0`, Node `>=24 <27`, `tar` `7.5.22`, and `better-sqlite3` `^13.0.3`; the
+lockfile resolves `better-sqlite3` `13.0.3`. MCP SDK dependencies are `2.x`; `yaml` and `zod` support policy/data
+handling, while TypeScript and Vitest are development tooling. The archive adapter imports only `tar/parse` by
+design. The last recorded published npm version is `0.2.0`; this migration made no registry query, so current source
+is not thereby a newly published release. CI is defined for Linux Node 24; the checkpoint evidence below is local
+macOS Node 26.3.1 on Darwin arm64 evidence. This task did not query CI status.
+
+### Graph Genesis: V1 versus V2
+
+V1 has a public CLI source route: `apg graph genesis filesystem` parses through
+`src/cli/graph-genesis.ts` and dynamically loads `src/stage/graph-genesis-live.ts`. It is approval-gated and has
+private audit/output inputs, but it is not evidence of a successful candidate. The recorded v14 run was a verified
+safe failure caused by peer rejection, with no successful candidate. See
+[docs/graph-genesis-v14-live-acceptance-architecture-check.md](./docs/graph-genesis-v14-live-acceptance-architecture-check.md).
+
+V2 is dormant and is not imported by the public CLI or V1 live route. At `9bfeddd`, only a network-free private
+foundation is accepted: original root/listener/clock/DB identity, immutable launch material, one-time
+action/approval/start-lease, durable pre-effect audit, opaque root-owned preparation, and conservative failure
+ownership. Cancellation may leave a native operation running; descriptor custody remains until it settles, and
+bounded reconciliation can stay unknown. This does not create a successful candidate, cleanup, or OS cancellation.
+Details and exact evidence are in
+[docs/exact-candidate-v2-production-wiring-boundary-architecture-check.md](./docs/exact-candidate-v2-production-wiring-boundary-architecture-check.md).
+
+V2 is deliberately separated so V1’s strict peer rejection is not relaxed: peer evaluation, Candidate2, Plan3,
+Projection3, Envelope2, and Artifact2 are distinct foundations. A candidate digest or decoded label is data, not
+authority. Metadata, candidate, artifact, stage, and startup each require their own authority boundary. The explicit
+target profile remains `@modelcontextprotocol/server-filesystem@2026.7.10`; the Graph Genesis experiment is limited
+to its reviewed Node/npm runtime (`npm` 11.16.0), which is distinct from core Node 24–26 support. See
+[docs/exact-candidate-peer-semantics-v2-integration-architecture-check.md](./docs/exact-candidate-peer-semantics-v2-integration-architecture-check.md)
+and [docs/exact-candidate-v2-compiler-post-state-artifact-composition-architecture-check.md](./docs/exact-candidate-v2-compiler-post-state-artifact-composition-architecture-check.md).
+
+Concrete V2 metadata ledger/coverage, successful post-state/compiler/Artifact2 composition, authenticated cleanup,
+full V2 completion/activation, and containment/platform validation remain incomplete or undecided. No V1 behavior
+or public activation changed. The next technical priority is a bounded design review of V2 metadata-ledger/coverage
+composition; it is not implementation or execution approval.
+
+### Companion and external handoff
+
+The macOS companion is a separate repository and cannot become a second enforcement owner; the CLI remains the
+boundary if the companion is absent or closed. See [docs/macos-product-plan.md](./docs/macos-product-plan.md).
+Last recorded handoff only: Apple support follow-up was awaiting a response after an app copy and sysdiagnose were
+submitted for a `syspolicy_check` notary-submission exit-70 issue that persisted after restart. This was not freshly
+checked, is independent of the core network-free V2 work, and no companion repository, Apple system, diagnostic,
+path, or identifier was accessed here. ContextGate is outside this repository’s current scope.
+
+### Reused verification evidence
+
+These unchanged-source results were reused for this documentation-only update; they are not fresh live acceptance
+evidence:
+
+| Check | Result |
+| --- | --- |
+| Direct installed typecheck | `./node_modules/.bin/tsc -p tsconfig.json --noEmit` exited 0. |
+| Direct installed build | `./node_modules/.bin/tsc -p tsconfig.json` exited 0. |
+| V2 targeted tests | 228 passed across 4 files with `--maxWorkers=1 --testTimeout=30000`. |
+| Default network-free suite | 606 passed, 3 skipped; 37 passed / 1 skipped files, with `--maxWorkers=1 --testTimeout=30000`. |
+| Independent V2 review | Root-owned filter: 72 passed, 141 filtered; no-emit typecheck exited 0. |
+
+The three skips are the opt-in Everything/Filesystem compatibility tests and the real Exact Filesystem acceptance;
+network-free controls in the acceptance file still run. Normal commands are `npm run typecheck`, `npm run build`,
+and `npm test`; direct installed equivalents are `./node_modules/.bin/tsc -p tsconfig.json --noEmit`,
+`./node_modules/.bin/tsc -p tsconfig.json`, and `./node_modules/.bin/vitest run`. Opt-in real-MCP tests may download
+and execute packages, were not run, and require a separate exact approval.
+
+### Known limits and document debt
+
+- Local Dashboard/SQLite are not account isolation. Local hash chains and unsigned receipts are not independent
+  attestation.
+- Same-user path races and non-preemptible native operations are conservatively detected/custodied where possible,
+  not atomically eliminated. V2 partial outputs remain preserved on failure.
+- A post-effect audit failure cannot reliably undo an already completed local side effect; automatic rollback is not
+  implemented.
+- README and SECURITY have broader, potentially stale support/version wording. This migration does not change those
+  public policy or support claims; reconcile them only under a separate review.
+- Detailed historical decisions and rejected work remain below and in `docs/`. Do not use that record to authorize
+  a new effect or inspect old evidence, quarantine, DB, candidate, or workspace state.
+
+### Documentation migration status
+
+This state summary and the historical checkpoint notice in [ARCHITECTURE.md](./ARCHITECTURE.md) are the permitted
+operational-fact portion of the migration. The requested AGENTS rewrite and compression of the 811-line historical
+record are blocked by safety review, so this is a summary-first, history-preserved partial migration. This docs-only
+checkpoint is recorded locally; remote publication of this documentation was not authorized. Inspect current Git
+status before continuing.
+
+## Historical detailed record
 
 **Latest authority (committed `00bd0c9`):** `4eb870d` committed the dormant Exact Candidate V2 quiesced execution
 foundation and `00bd0c9` committed bounded integration startup lifecycle hardening. v14 produced a verified safe

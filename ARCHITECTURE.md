@@ -1,5 +1,10 @@
 # Agent Permission Guard Architecture
 
+> Status note (2026-09-13): the checkpoint statements below are historical architecture context. For current
+> enabled versus dormant status, verification limits, and next technical work, read
+> [PROJECT_STATE.md](./PROJECT_STATE.md) first. In particular, V1 Graph Genesis has a public source route while V2
+> remains a network-free dormant foundation; this note makes no activation or effect claim.
+
 ## Product Boundary
 
 Agent Permission Guard enforces only execution paths deliberately routed through it.
