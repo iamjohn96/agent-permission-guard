@@ -2,9 +2,11 @@
 
 ## Current Milestone
 
-**Latest authority (committed `044406c`):** v14 produced a verified safe failure, not successful candidate
-acceptance. The network-free V2 production snapshot/approval/session foundation and exact Candidate V2
-compiler/post-state/Artifact2 completion foundation are committed and technically verified; they remain
+**Latest authority (committed `00bd0c9`):** `4eb870d` committed the dormant Exact Candidate V2 quiesced execution
+foundation and `00bd0c9` committed bounded integration startup lifecycle hardening. v14 produced a verified safe
+failure, not successful candidate acceptance. The network-free V2 production snapshot/approval/session foundation
+and exact Candidate V2 compiler/post-state/Artifact2 completion foundation are committed and technically verified;
+they remain
 dormant/unwired. The initial raw-input implementation and its 4/4 targeted plus 368/3 suite results were rejected and
 are not acceptance evidence. A source-coherence checkpoint has removed the rejected raw session references and
 restored typecheck with 2/2 shallow dormant-bridge tests; those tests do not establish production provenance.
@@ -58,16 +60,16 @@ review time; the later direct user approval covers only its stated dormant synth
 effect, or activation authority. Its prior typecheck/build, focused 101/101, stdio 28/28, and
 465 passed/3 skipped network-free records are unchanged-source historical evidence, not evidence for that proposed
 work. Any implementation requires a new exact approval limited to its stated files and test-owned fake/inert/mocked
-resources. The subsequent approved nine-file dormant network-free execution foundation is currently uncommitted:
-it privately retains the frozen `privateExecution` object through sealing, adds only a data-only synthetic execution
+resources. At that review-time snapshot, the subsequent approved nine-file dormant network-free execution foundation
+was uncommitted: it privately retained the frozen `privateExecution` object through sealing, added only a data-only synthetic execution
 ordering model, and records durable start before fixture-only broker/child/listener quiescence. It exposes no live
 listener/process/network path and keeps Artifact2 provenance explicitly synthetic/unavailable. Fresh source evidence
 was corrected after supervisor review found start-window, listener-replay, mutable-binding, and post-drain admission
 gaps in the initial synthetic state model. The new red matrix failed in five cases before the strict phase/closed-key
 correction. Worker evidence observed 111/111 focused V2 and a full 475 passed/3 skipped, but the latter is not
 accepted final full-regression evidence after supervisor reruns. Supervisor verifies typecheck exit 0, exact focused
-V2 at 111/111, and separate binding+production+completion+execution at 119/119. The full suite is Partially Verified
-/ inconsistent: unchanged preflight cancellation failed once (while standalone passed 5/5), and unchanged stdio
+V2 at 111/111, and separate binding+production+completion+execution at 119/119. At that pre-hardening review time,
+the full suite was Partially Verified / inconsistent: unchanged preflight cancellation failed once (while standalone passed 5/5), and unchanged stdio
 Dashboard URL/state/policy timing failed in a second full run and standalone (25/28), with unhandled-rejection
 evidence. This does not prove V2 causation or a purely environmental cause. The working hypothesis is brittle legacy
 3-second Dashboard announcement/deadline and 20-second preflight timing under slow startup/resources; lifecycle
@@ -83,12 +85,95 @@ after each child completes cleanup and exits. The five production-phase cases re
 darwin/arm64/Node-v26.3.1 guard while generic lifecycle cases remain cross-platform; the fixture uses a 20-second
 operation deadline under a 25-second guarded-case cap, with a deterministic cleanup-before-rejection test. Fresh
 direct typecheck/build passed; preflight lifecycle tests passed 10/10 on the exact host (no platform skips), and
-stdio proxy passed 28/28 under its JSON reporter. The final one-worker network-free suite passed 480 tests with 3
-skipped across 102 passing suites under the 30-second test limit. Earlier current-task records (the inert 3/3
-fixture, text-only stdio progress, and the 473/3 suite) are historical and superseded. This retains the prior
+stdio proxy passed 28/28 under its JSON reporter. After that hardening, the build-frozen final one-worker
+network-free suite passed 480 tests with 3 skipped across 36 passed/1 skipped files under the 30-second test limit;
+its 102 passing nested suites are not a file count. Earlier current-task records (the inert 3/3 fixture, text-only
+stdio progress, and the 473/3 suite) are historical and superseded. This retains the prior
 inconsistent evidence in
 `docs/bounded-integration-test-lifecycle-condition-based-startup-architecture-check.md`. It changes no
 production timeout/behavior/security, V2 source, dependency, schema, live route, product DB, or external effect.
+The approved [V2 production wiring boundary Architecture Check](docs/exact-candidate-v2-production-wiring-boundary-architecture-check.md)
+is **FIRST FAILURE-LIFECYCLE UNIT SUPERVISOR-VERIFIED / code-tests FROZEN; full slice NOT ACCEPTED**
+as of 2026-09-13. The current baseline remains main/local origin/main `00bd0c9`. The user-authorized Astra–High
+correction preserves the nine-file boundary and all six existing dirty files. No extra source, dependency/schema,
+live route, real network/Dashboard/child, product DB/real candidate/past evidence, commit or push was used.
+
+The new lexical concrete owner consumes the exact session seal once, retains the original private launch/listener,
+enforces start/arm/spawn ordering and sealed monotonic continuity, and owns bounded stop/drain and one factual
+failure terminal followed by independent read-only/query-only reconciliation. It does not invoke synthetic
+completion or produce an Artifact2; its only terminal statuses are execution_error and
+outcome_unknown_after_interruption. Runtime proof values make no module-mock or local-observed provenance claim.
+
+The unchanged initial DB predicate is no longer misused after authorization: a private owner-expected bounded
+journal retains original source identity plus exact authorization/action/approval/Plan/Envelope relationships.
+Uncertain start performs no effects or fallback writes. Post-start proven requires the terminal triple; a
+transient verify-before-finalize failure cannot be converted into prefix-only success. Outcome startedAt is bounded
+by the execution-start event, and readonly close failure returns unknown. Context/output revocation uses a shared
+disposal owner; simultaneous closes do not double-close descriptors. Outstanding Node reads are not preemptible:
+execute returns bounded unknown, context/output close returns failure after a five-second custody wait, and the
+descriptor/path reservation remains held until the read eventually settles. This is not successful cleanup.
+
+Fresh final source evidence: direct installed typecheck exit 0; direct build exit 0 after the identical command's
+sandbox escalation for ignored dist writes; first-unit matrix 51 passed (90 filtered, 141 total); after-build four
+approved V2 targeted files 156 passed, 0 skipped, 4 passed files, exit 0 (8.34 seconds). Full network-free suite was
+NOT RUN by the implementer at handoff; this is a historical limitation, superseded by the independent result below.
+No npm/npx/package-script runner was used. The Architecture Check records
+red-to-green cases, intermediate fixture corrections and the initial TS5033 build permission failure. Historic
+105/105, 106/106, 483/3, uncaptured full-suite and TS2339 claims are superseded for this unit, not retroactively
+accepted as current evidence.
+
+Supervisor independently matched the three submitted code hashes, passed direct typecheck and the first-unit
+51-case matrix (90 filtered, 141 total; exit 0; 4.36 seconds), passed diff whitespace check and confirmed no V2
+CLI/live import. The supervisor then ran exact direct `./node_modules/.bin/vitest run --maxWorkers=1 --testTimeout=30000`
+on the unchanged code hashes/fixed build: exit 0, 534 passed / 3 skipped (537 total), 37 passed / 1 skipped files
+(38 total), 65.50 seconds. Its test-owned loopback/DB fixtures are not live product evidence. This accepts only
+the stated failure-lifecycle unit, not the whole V2 slice. Code/tests were frozen for the subsequent two-document
+design pass; the later approved construction unit is described below.
+
+The next action at that checkpoint was the docs-only construction-lineage proposal before any metadata/output/cleanup composition. Remaining
+gaps then included opaque root-to-profile/workspace lineage (order alone proved root-before-snapshot only), concrete
+metadata ledger/coverage, successful post-state/compiler/Artifact2 path, authenticated cleanup and verification of
+those future changes. The current full regression has passed, but no whole-slice success or live acceptance is
+claimed. A lineage Architecture Check must assess the same
+allowlist first; any required hardening/containment authority-file changes need a new exact scope decision.
+Rollback is a reviewed inverse of scoped hunks preserving prior dirty work, not reset/checkout.
+
+Reviewed next-unit recommendation: the session constructs its own exact profile -> workspace -> containment ->
+snapshot tuple from an opaque same-authority runtime seed (authentic 11 files, 5 trees, host/version references).
+Generic snapshot.prepare remains synthetic-compatible but cannot create the private same-root construction
+association. The minimal future edit set is production.ts, its unit test and the same two documents; inspection
+found no necessary hardening/containment API or extra-file change for cooperative mocked/local testing.
+Recommended workspace destination is the single exclusive child
+<authenticated output parent>/.apg-graph-genesis-v2-workspace, with retained private parent identity, one-use claim,
+no overwrite/retry and preservation of partial creation. Existing path-based initialize/observe operations are
+not atomically descriptor-relative or per-call abortable; late operations retain custody and never publish a
+prepared tuple. Tests must reject generic rewrapping, same-port replacement, foreign/copy/replay, namespace drift
+and cancellation at every stage while preserving all 51 first-unit cases.
+
+The user subsequently approved these material API/namespace choices and directly confirmed `승인할게`.
+Root-owned preparation is now implemented in the exact four-file subset: production.ts, its unit tests and these
+two documents. The two existing execution-production files remain frozen. The opaque seed is write-free;
+same-root/context/output/seed/destination claims precede every construction effect, retained authorities construct
+the exact tuple, and a private association gates publication and authorization. Parent/runtime/DB drift fails closed.
+Initial DB checks apply during preparation only, preserving the later owner-authorized append lifecycle.
+Root deadline and output/context cancellation fence each step; nested revalidation uses the same construction
+signal. Pending native work retains descriptor custody, and partial files are preserved without retry/adoption.
+Bounded rejection/close failure is incomplete or unknown, never a claim of atomic path-based creation or native
+OS cancellation. Fixture cleanup waits for the test-owned pending operations to settle.
+
+Current validation status: source/tests are frozen; direct installed typecheck/build exited 0 and the four V2
+targeted files passed 228/228 (four files, exit 0, 103.51 seconds). The single post-freeze full network-free suite
+passed 606 with 3 skipped (609 total), across 37 passed / 1 skipped files (38 total), exit 0, 159.69 seconds. Closed-DB
+pre-effect and unauthenticated-host-getter issues were reproduced red and corrected. Existing first-unit results
+above are historical, not evidence for this source. No whole-slice, metadata/Artifact2/cleanup success or live
+acceptance is claimed. Live effects, extra files, schema/dependencies and commit/push remain forbidden. Details,
+test provenance and final command evidence belong to the Architecture Check. The supervisor independently matched
+all four code/test hashes, reviewed the ownership/custody diff, and found no further mandatory correction. Its
+direct typecheck exited 0; the independent lineage filter passed 72 with 141 filtered (213 total), one passed file,
+exit 0, 6.37 seconds (tests 5.63 seconds). It reused the unchanged-build 228-case targeted and 606/3 full-suite
+evidence without repeating the full suite. **Root-Owned Preparation construction lineage is independently accepted
+within the network-free unit.** Keep source/tests frozen; whole-V2-slice, metadata/Artifact2/cleanup and live
+completion are not accepted or complete. This verdict closeout changes only the two documents.
 
 The Exact Production Graph Genesis Live Run Readiness Architecture Check was accepted on 2026-09-09. Its first
 network-free readiness foundation is committed and pushed at `7c15130`. The approved non-injectable production
@@ -707,7 +792,20 @@ un-wired evaluator/v2-design summary above supersede them as the current Graph G
 
 ## Next Recommended Task
 
-Do not advance the preserved V2 work automatically or treat it as production/live acceptance. The
-test-only lifecycle Architecture Check is complete; any further production/V2/stdio/preflight behavior change needs
-a new exact approval and independent review. Production/live wiring, network, product DB,
-candidate/evidence/quarantine access, commit, and push remain prohibited.
+After the user's exact approval, the implementation task may checkpoint commit/push the verified six adopted
+dirty files on baseline `00bd0c9`. This recommendation is not approval and no commit/push has been performed:
+
+- `src/stage/graph-genesis-v2-production.ts`
+- `test/unit/graph-genesis-v2-production.test.ts`
+- `src/stage/graph-genesis-v2-execution-production.ts`
+- `test/unit/graph-genesis-v2-execution-production.test.ts`
+- `docs/exact-candidate-v2-production-wiring-boundary-architecture-check.md`
+- `PROJECT_STATE.md`
+
+Keep source/tests and both execution-production files frozen while awaiting that decision. The earlier supervisor
+hold and unapplied Sol–High recommendation were historical; they are not the current implementation/model state.
+No model setting was changed during this closeout, and no unverified current-model claim is made. New tests/build
+or automatic metadata/Artifact2/cleanup/live implementation are not part of this docs-only completion. Public/live
+activation, fresh execution, actual npm/network/Dashboard/product DB/real candidate/past evidence/quarantine access,
+dependency/schema changes and commit/push still require separate exact approval. Any rollback must be a reviewed
+inverse of scoped hunks preserving existing dirty work, not reset/stash/delete.

@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { constants, existsSync, lstatSync, realpathSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
@@ -21,6 +23,7 @@ import { startDashboard, type DashboardHandle } from '../dashboard/server.js';
 import { staticPolicyIdentity } from '../policy/identity.js';
 import type {
   AuthenticatedRuntimeTreeSnapshot,
+  GraphGenesisLaunch,
   GraphGenesisLimits,
   GraphGenesisWorkspace,
   RuntimeTreeSnapshotAuthority,
@@ -39,6 +42,7 @@ import {
   type GraphGenesisCandidateArtifactV2Binding,
 } from './graph-genesis-candidate-artifact-v2.js';
 import { SyntheticPostStateV2Authority, type SyntheticPostStateV2 } from './graph-genesis-v2-post-state.js';
+import type { DormantV2ConcreteExecution, DormantV2ConcreteTerminalProof, DormantV2MockedExecution, DormantV2MockedTerminalProof } from './graph-genesis-v2-execution-production.js';
 import {
   SyntheticGraphGenesisV2ExecutionAuthority,
   type SyntheticGraphGenesisV2Run,
@@ -87,6 +91,7 @@ const FILE_KEYS = [
 const TREE_KEYS = ['npmTree', 'distRuntimeTree', 'sqliteLib', 'migrations', 'webAssets'] as const;
 const DASHBOARD_KEYS = ['url', 'instanceId', 'close', 'bindGraphAction'] as const;
 const OUTPUT_NAME = 'candidate.json';
+const CONCRETE_WORKSPACE_NAME = '.apg-graph-genesis-v2-workspace';
 const TARGET = '@modelcontextprotocol/server-filesystem@2026.7.10' as const;
 const PREPARATION_WINDOW_MS = 120_000;
 const APPROVAL_TTL_MS = 120_000;
@@ -138,6 +143,9 @@ export type GraphGenesisV2ConcreteProductionBundle = Readonly<{
   containment: AuthenticatedOwnedContainmentEvidence;
 }>;
 
+export type GraphGenesisV2RuntimeSeedInput = Readonly<Pick<GraphGenesisV2ConcreteProductionBundle,
+  'files' | 'trees' | 'host' | 'runtimeVersions'>>;
+export type AuthenticatedGraphGenesisV2RuntimeSeed = Readonly<{ runtimeSeedVersion: 1 }>;
 type OwnedProductionBundle = GraphGenesisV2ConcreteProductionBundle;
 const snapshotBundles = new WeakMap<object, OwnedProductionBundle>();
 
@@ -185,6 +193,7 @@ export type PreparedGraphGenesisV2Production = Readonly<{
 export type AuthenticatedGraphGenesisV2SealedAuthorization = Readonly<{
   sealedAuthorizationVersion: 2;
 }>;
+export type PreparedGraphGenesisV2ConcreteRoot = Readonly<{ rootVersion: 2; brokerPort: number }>;
 
 export type GraphGenesisV2AuthorizationResult =
   | Readonly<{
@@ -207,7 +216,9 @@ type OwnedPreparedProduction = Readonly<{
   context: AuthenticatedGraphGenesisV2SessionContext;
   output: AuthenticatedGraphGenesisV2OutputIntent;
   privateBinding: object;
-  privateExecution: object;
+  privateExecution: GraphGenesisV2PrivateExecution;
+  originalListener?: OwnedConcreteV2Listener;
+  construction?: OwnedConcretePreparation;
 }>;
 
 type OwnedSealedAuthorization = Readonly<{
@@ -219,9 +230,11 @@ type OwnedSealedAuthorization = Readonly<{
   actionId: string;
   approvalId: string;
   startByMonotonicMs: number;
+  sealedAtMonotonicMs: number;
   executionDeadlineMonotonicMs: number;
-  privateExecution: object;
+  privateExecution: GraphGenesisV2PrivateExecution;
   callerSignal?: AbortSignal;
+  concreteAudit?: ConcreteAuditSnapshot;
 }>;
 
 type AuditCheckpoint = Readonly<{
@@ -238,10 +251,12 @@ type OwnedSessionContext = Readonly<{
   dashboardPort: number;
   controller: AbortController;
   outputs: Set<OwnedOutputIntent>;
+  listeners: Set<OwnedConcreteV2Listener>;
 }>;
 
 type OwnedOutputIntent = Readonly<{
   publicIntent: AuthenticatedGraphGenesisV2OutputIntent;
+  preparations: Set<OwnedConcretePreparation>;
   context: AuthenticatedGraphGenesisV2SessionContext;
   canonicalPath: string;
   parentCanonicalPath: string;
@@ -262,6 +277,26 @@ const COMPLETION_OWNER = Symbol('session-owned-synthetic-completion');
 type CompletionProof = Readonly<{ actionId: string; artifactDigest: string; evidenceOrigin: 'synthetic_fixture'; terminalStatus: 'incomplete_external_read' }>;
 type ProofRow = Record<string, unknown>;
 type OwnedEvent = Readonly<{ type: string; details: unknown }>;
+type GraphGenesisV2PrivateExecution = Readonly<{
+  capsuleVersion: 2; planId: string; sessionId: string; routeToken: string;
+  launch: GraphGenesisLaunch; runtimePaths: Readonly<Record<string, string>>; dashboardInstanceId: string;
+  originalListenerIdentityDigest?: string;
+}>;
+type OwnedConcreteV2Listener = {
+  readonly server: Server;
+  port: number;
+  identityDigest: string;
+  state: 'disarmed' | 'armed' | 'drained' | 'closed';
+  readonly controller: AbortController;
+  readonly context: OwnedSessionContext;
+  readonly deadline: number;
+  lastNow: number;
+  executionOwned: boolean;
+  closePromise: Promise<boolean> | undefined;
+  lifetime: ReturnType<typeof setTimeout> | undefined;
+  detached: () => void;
+};
+
 
 /** No exported constructor, runtime raw fields, caller-selected DB or injected proof. */
 class SessionOwnedSyntheticCompletion {
@@ -649,6 +684,521 @@ class SessionOwnedSyntheticCompletion {
   }
 }
 
+
+const CONCRETE_OWNER = Symbol('session-owned-concrete-v2');
+const AUTHORIZED_V2_EVENTS = [
+  'decision_recorded', 'graph_genesis_v2_session_created', 'approval_requested', 'approval_approved',
+  'graph_genesis_v2_approved_revalidation_complete', 'authorization_receipt_finalized',
+  'graph_genesis_authorization_ready', 'graph_genesis_v2_authorization_finalized',
+] as const;
+type ConcreteAuditSnapshot = Readonly<{
+  events: readonly ProofRow[]; call: ProofRow; approval: ProofRow; parentIdentity: string;
+}>;
+function concreteEventDetails(row: ProofRow): ProofRow {
+  return proofRecord(proofRecord(proofJson(row.event_json)).details);
+}
+function concreteDBIdentity(source: ExistingGraphGenesisAuditDatabase, parentIdentity: string, db: AuditDatabase): void {
+  if (!authenticatesExistingGraphGenesisAuditDatabase(source)) fail();
+  const file = lstatSync(source.canonicalPath), parent = lstatSync(dirname(source.canonicalPath));
+  if (realpathSync(source.canonicalPath) !== source.canonicalPath || !file.isFile() || file.isSymbolicLink()
+    || file.nlink !== 1 || proofIdentity(file) !== source.fileIdentityDigest || !parent.isDirectory()
+    || parent.isSymbolicLink() || proofIdentity(parent) !== parentIdentity) fail();
+  const sidecars: string[] = [];
+  for (const suffix of ['-wal', '-shm']) {
+    const path = source.canonicalPath + suffix;
+    if (!existsSync(path)) continue;
+    const info = lstatSync(path);
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.uid !== file.uid || (info.mode & 0o077) !== 0) fail();
+    sidecars.push(suffix);
+  }
+  // Durability is a property of the retained writer; query-only is independently checked on the proof connection.
+  const profile = {
+    journalMode: String(source.database.pragma('journal_mode', { simple: true })).toLowerCase(),
+    synchronous: Number(source.database.pragma('synchronous', { simple: true })),
+    busyTimeoutMs: Number(source.database.pragma('busy_timeout', { simple: true })),
+    integrity: 'ok', sidecars,
+  };
+  if (profile.journalMode !== 'wal' || profile.synchronous !== 2 || profile.busyTimeoutMs !== 5000
+    || digest(profile) !== source.durabilityProfileDigest) fail();
+  const bytes = db.prepare("SELECT coalesce(sum(length(CAST(sql AS BLOB))),0) FROM sqlite_schema WHERE type='table' AND name IN ('approvals','audit_events','schema_migrations','tool_calls')").pluck().get();
+  if (typeof bytes !== 'number' || bytes > 512 * 1024
+    || db.prepare('SELECT count(*) FROM schema_migrations').pluck().get() !== 2) fail();
+  const migrations = db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all();
+  const tables = db.prepare("SELECT name,sql FROM sqlite_schema WHERE type='table' AND name IN ('approvals','audit_events','schema_migrations','tool_calls') ORDER BY name").all();
+  if (canonicalJson(migrations) !== '[1,2]' || digest({ migrations, tables }) !== source.schemaDigest) fail();
+}
+function concreteChain(db: AuditDatabase): ProofRow[] {
+  const events = boundedProofEvents(db);
+  let tail = '0'.repeat(64), sequence = 0;
+  const ids = new Set<string>();
+  for (const row of events) {
+    const event = proofRecord(proofJson(row.event_json));
+    if (!Number.isSafeInteger(row.sequence) || Number(row.sequence) <= sequence || typeof row.event_id !== 'string'
+      || ids.has(row.event_id) || canonicalJson(Object.keys(event).sort()) !== canonicalJson(['createdAt','details','eventId','eventType','toolCallId'].sort())
+      || event.eventId !== row.event_id || event.eventType !== row.event_type || event.toolCallId !== row.tool_call_id
+      || event.createdAt !== row.created_at || canonicalJson(event) !== row.event_json || row.previous_hash !== tail
+      || row.event_hash !== digestBytes(tail + '\n' + row.event_json)) fail();
+    sequence = Number(row.sequence); tail = String(row.event_hash); ids.add(row.event_id);
+  }
+  return events;
+}
+function captureConcreteAuditSnapshot(source: ExistingGraphGenesisAuditDatabase, actionId: string, approvalId: string): ConcreteAuditSnapshot {
+  const parentIdentity = proofIdentity(lstatSync(dirname(source.canonicalPath)));
+  concreteDBIdentity(source, parentIdentity, source.database);
+  const events = concreteChain(source.database);
+  // The enclosing authorize method has just verified the exact eight owner-created events.
+  const last = events.at(-1); if (last === undefined || typeof last.tool_call_id !== 'string') fail();
+  if (last.tool_call_id !== actionId) fail();
+  const own = events.filter(row => row.tool_call_id === actionId);
+  if (canonicalJson(own.map(row => row.event_type)) !== canonicalJson(AUTHORIZED_V2_EVENTS)) fail();
+  if (concreteEventDetails(own[7]!).approvalId !== approvalId
+    || own[0]!.previous_hash !== source.initialChainTail) fail();
+  return Object.freeze({
+    events: Object.freeze(events.map(row => Object.freeze({ ...row }))),
+    call: Object.freeze(boundedProofRow(source.database, 'tool_calls', actionId)),
+    approval: Object.freeze(boundedProofRow(source.database, 'approvals', approvalId)), parentIdentity,
+  });
+}
+
+/** Owner-held append expectations; neither input rows nor a supplied proof can create this journal. */
+class ConcreteAuditJournal {
+  readonly #sealed: OwnedSealedAuthorization;
+  readonly #source: ExistingGraphGenesisAuditDatabase;
+  readonly #snapshot: ConcreteAuditSnapshot;
+  #expected: readonly ProofRow[];
+  #startAttempted = false;
+  #started = false;
+  #pending: OwnedEvent | undefined;
+  #terminal: Readonly<{ summary: GraphGenesisExecutionSummary; status: 'execution_error' | 'outcome_unknown_after_interruption' }> | undefined;
+  #reconciled = false;
+
+  constructor(token: symbol, sealed: OwnedSealedAuthorization, context: OwnedSessionContext) {
+    if (token !== CONCRETE_OWNER || sealed.concreteAudit === undefined) fail();
+    this.#sealed = sealed; this.#source = context.source; this.#snapshot = sealed.concreteAudit;
+    this.#expected = this.#snapshot.events;
+    Object.freeze(this);
+  }
+  verify(): void { this.#check(this.#source.database, []); }
+  start(): void {
+    this.verify();
+    if (this.#startAttempted) fail();
+    this.#startAttempted = true;
+    this.#pending = { type: 'execution_start_recorded', details: { receiptDigest: this.#authDigest() } };
+    this.#sealed.audit.markExecutionStarted();
+    this.#acceptPending(); this.#started = true;
+  }
+  append(type: string, details: unknown): void {
+    this.verify();
+    if (!this.#started || this.#pending !== undefined) fail();
+    this.#pending = Object.freeze({ type, details: parseStrictJsonDocument(canonicalJson(details)) });
+    this.#sealed.audit.appendEvidence(type, details);
+    this.#acceptPending();
+  }
+  finalize(summary: GraphGenesisExecutionSummary, status: 'execution_error' | 'outcome_unknown_after_interruption'): void {
+    this.verify();
+    if (!this.#started || this.#terminal !== undefined) fail();
+    this.#terminal = Object.freeze({ summary, status });
+    // May commit then throw. The caller must reconcile; never call a fallback writer.
+    this.#sealed.audit.finalizeGraphGenesisOutcome(summary, status);
+  }
+  reconcile(requireTerminal: boolean): boolean {
+    if (this.#reconciled) fail(); this.#reconciled = true;
+    let db: AuditDatabase | undefined;
+    let proven = false;
+    try {
+      concreteDBIdentity(this.#source, this.#snapshot.parentIdentity, this.#source.database);
+      db = openAuditDatabaseReadOnly(this.#source.canonicalPath);
+      if (!db.readonly || db === this.#source.database || db.pragma('query_only', { simple: true }) !== 1) fail();
+      const proofDB = db;
+      proofDB.transaction(() => {
+        if (requireTerminal && this.#terminal === undefined) fail();
+        const events = concreteChain(proofDB);
+        const suffix = events.slice(this.#expected.length);
+        if (this.#terminal !== undefined) this.#check(proofDB, suffix, true);
+        else if (this.#pending !== undefined && suffix.length === 1) this.#check(proofDB, suffix);
+        else this.#check(proofDB, []);
+      })();
+      proven = true;
+    } catch { proven = false; }
+    finally { try { db?.close(); } catch { proven = false; } }
+    return proven;
+  }
+  #authDigest(): string {
+    const own = this.#snapshot.events.filter(row => row.tool_call_id === this.#sealed.actionId);
+    if (own.length !== 8) fail();
+    return receiptDigest(AuthorizationReceiptSchema.parse(concreteEventDetails(own[5]!).receipt));
+  }
+  #acceptPending(): void {
+    const events = this.#check(this.#source.database, [this.#pending!]);
+    this.#expected = Object.freeze(events); this.#pending = undefined;
+  }
+  #check(db: AuditDatabase, extra: readonly (ProofRow | OwnedEvent)[], terminal = false): ProofRow[] {
+    concreteDBIdentity(this.#source, this.#snapshot.parentIdentity, db);
+    const events = concreteChain(db);
+    if (events.length !== this.#expected.length + extra.length
+      || canonicalJson(events.slice(0, this.#expected.length)) !== canonicalJson(this.#expected)) fail();
+    const suffix = events.slice(this.#expected.length);
+    if (!terminal) for (const row of suffix) {
+      if (this.#pending === undefined || row.tool_call_id !== this.#sealed.actionId
+        || row.event_type !== this.#pending.type || canonicalJson(concreteEventDetails(row)) !== canonicalJson(this.#pending.details)) fail();
+    }
+    const initialOwn = this.#snapshot.events.filter(row => row.tool_call_id === this.#sealed.actionId);
+    if (initialOwn.length !== 8 || canonicalJson(initialOwn.map(row => row.event_type)) !== canonicalJson(AUTHORIZED_V2_EVENTS)) fail();
+    const authDetails = concreteEventDetails(initialOwn[5]!);
+    const auth = AuthorizationReceiptSchema.parse(authDetails.receipt);
+    const prepared = this.#sealed.prepared, receipt = prepared.receipt, envelope = prepared.envelope;
+    const expectedAction = { id: this.#sealed.actionId, adapter: receipt.adapter, adapterVersion: receipt.adapterVersion,
+      operation: receipt.operation, identityAssurance: receipt.identityAssurance,
+      intentDigest: 'sha256:' + digest({ format: 'apg-portable-intent-v1', adapter: receipt.adapter,
+        adapterVersion: receipt.adapterVersion, operation: receipt.operation, material: receipt.identityMaterial }),
+      subject: receipt.subject, executionPlanHash: receipt.executionPlanHash };
+    if (canonicalJson(auth.action) !== canonicalJson(expectedAction) || auth.schema.minorVersion !== 2
+      || auth.coverage.boundary !== 'graph_genesis_plan' || auth.authorization.status !== 'authorized'
+      || canonicalJson(auth.policy) !== canonicalJson({ ...receipt.policy, matchedRuleId: 'graph_genesis_builtin_ask_v2' })
+      || canonicalJson(auth.decision) !== canonicalJson({ base: 'ask', effective: 'ask', reasonCodes: [...GRAPH_GENESIS_POLICY.reasonCodes],
+        riskScore: GRAPH_GENESIS_POLICY.score, riskBand: GRAPH_GENESIS_POLICY.band })
+      || authDetails.receiptDigest !== receiptDigest(auth)
+      || envelope.auditFileIdentityDigest !== this.#source.fileIdentityDigest
+      || envelope.auditSchemaDigest !== this.#source.schemaDigest
+      || envelope.auditDatabaseInstanceId !== this.#source.databaseInstanceId
+      || envelope.auditDurabilityProfileDigest !== this.#source.durabilityProfileDigest
+      || envelope.initialAuditChainTail !== this.#source.initialChainTail
+      || concreteEventDetails(initialOwn[1]!).planHash !== prepared.plan.planHash
+      || concreteEventDetails(initialOwn[1]!).executionEnvelopeHash !== envelope.executionEnvelopeHash
+      || concreteEventDetails(initialOwn[7]!).approvalId !== this.#sealed.approvalId
+      || concreteEventDetails(initialOwn[7]!).executionEnvelopeHash !== envelope.executionEnvelopeHash) fail();
+    const approval = boundedProofRow(db, 'approvals', this.#sealed.approvalId);
+    if (canonicalJson(approval) !== canonicalJson(this.#snapshot.approval) || approval.tool_call_id !== this.#sealed.actionId
+      || approval.status !== 'approved' || auth.approval.requestId !== approval.id || auth.approval.outcome !== 'approved'
+      || !auth.approval.required || auth.approval.principalAssurance !== 'local_dashboard_session'
+      || auth.approval.requestedAt !== approval.requested_at || auth.approval.decidedAt !== approval.decided_at
+      || auth.approval.expiresAt !== approval.expires_at) fail();
+    const call = boundedProofRow(db, 'tool_calls', this.#sealed.actionId);
+    const mutable = new Set(['status','completed_at','latency_ms','result_summary_json','error_code']);
+    for (const key of Object.keys(this.#snapshot.call)) if (!mutable.has(key)
+      && canonicalJson(call[key]) !== canonicalJson(this.#snapshot.call[key])) fail();
+    const args = { executionEnvelopeHash: envelope.executionEnvelopeHash, planHash: prepared.plan.planHash };
+    if (call.arguments_json !== canonicalJson(args) || call.server_id !== 'apg-graph-genesis' || call.tool_name !== 'filesystem_metadata_graph'
+      || call.request_hash !== digest({ serverId: call.server_id, toolName: call.tool_name, arguments: args })) fail();
+    const started = events.some(row => row.tool_call_id === this.#sealed.actionId && row.event_type === 'execution_start_recorded');
+    if (!terminal) {
+      if (call.status !== (started ? 'forwarding' : this.#snapshot.call.status) || call.completed_at !== this.#snapshot.call.completed_at
+        || call.result_summary_json !== this.#snapshot.call.result_summary_json || call.error_code !== this.#snapshot.call.error_code) fail();
+    } else {
+      const expected = this.#terminal; if (expected === undefined || suffix.length !== 3) fail();
+      if (canonicalJson(suffix.map(row => row.event_type)) !== canonicalJson(['graph_genesis_incomplete','execution_completed','outcome_receipt_finalized'])
+        || suffix.some(row => row.tool_call_id !== this.#sealed.actionId)) fail();
+      const outcomeDetails = concreteEventDetails(suffix[2]!);
+      const outcome = OutcomeReceiptSchema.parse(outcomeDetails.receipt);
+      const start = events.find(row => row.tool_call_id === this.#sealed.actionId && row.event_type === 'execution_start_recorded');
+      if (start === undefined || concreteEventDetails(start).receiptDigest !== receiptDigest(auth)) fail();
+      const summary = expected.summary;
+      const observed = { kind: 'graph_genesis', isError: true, externalReadStatus: summary.metadata.externalReadStatus,
+        metadataRequestCount: summary.metadata.requestCount, metadataUniquePackageCount: summary.metadata.uniquePackageCount,
+        metadataResponseBytes: summary.metadata.responseBytes, executionStatus: summary.process.status, exitCode: summary.process.exitCode,
+        stdoutBytes: summary.process.stdoutBytes, stderrBytes: summary.process.stderrBytes,
+        cleanupStatus: summary.cleanup.status, terminalAuditStatus: summary.terminalAudit.status, errorCode: summary.errorCode };
+      if (canonicalJson(concreteEventDetails(suffix[1]!)) !== canonicalJson(summary)
+        || call.status !== expected.status || call.result_summary_json !== canonicalJson(summary) || call.error_code !== summary.errorCode
+        || outcome.schema.minorVersion !== 2
+        || canonicalJson(outcome.action) !== canonicalJson(auth.action) || canonicalJson(outcome.coverage) !== canonicalJson(auth.coverage)
+        || outcome.authorizationReceiptDigest !== receiptDigest(auth) || outcomeDetails.receiptDigest !== receiptDigest(outcome)
+        || outcome.execution.terminalStatus !== expected.status || outcome.execution.completedAt !== call.completed_at
+        || outcome.receipt.issuedAt !== call.completed_at || outcome.execution.startedAt < auth.receipt.issuedAt
+        || outcome.execution.startedAt > String(start.created_at)
+        || canonicalJson(outcome.execution.observedResult) !== canonicalJson(observed)
+        || canonicalJson(concreteEventDetails(suffix[0]!)) !== canonicalJson({ executionPlanHash: envelope.executionEnvelopeHash,
+          terminalStatus: expected.status, outcomeReceiptDigest: receiptDigest(outcome) })) fail();
+    }
+    concreteDBIdentity(this.#source, this.#snapshot.parentIdentity, db);
+    return events;
+  }
+}
+
+
+type ConcreteFailure = 'cancelled' | 'deadline' | 'clock_invalid' | 'audit_invalid' | 'spawn_failed'
+  | 'process_error' | 'output_overflow' | 'listener_failed' | 'revalidation_failed' | 'completion_unavailable';
+type ConcretePhase = 'reserved' | 'validated' | 'started' | 'armed' | 'spawn-intent' | 'running' | 'stopping' | 'terminal';
+
+class SessionOwnedDormantConcreteExecution {
+  readonly #sealed: OwnedSealedAuthorization;
+  readonly #prepared: OwnedPreparedProduction;
+  readonly #snapshots: ProductionGraphGenesisV2SnapshotAuthority;
+  readonly #listener: OwnedConcreteV2Listener;
+  readonly #context: OwnedSessionContext;
+  readonly #output: OwnedOutputIntent;
+  readonly #active: () => boolean;
+  readonly #journal: ConcreteAuditJournal;
+  readonly #abort = new AbortController();
+  readonly #dispose: Array<() => void> = [];
+  readonly #wake: Promise<void>;
+  #wakeResolve!: () => void;
+  readonly #closed: Promise<void>;
+  #closeResolve!: () => void;
+  #phase: ConcretePhase = 'reserved';
+  #claimed = false;
+  #result: Promise<DormantV2ConcreteTerminalProof> | undefined;
+  #failure: ConcreteFailure | undefined;
+  #startReturned = false;
+  #startUncertain = false;
+  #childAttempted = false;
+  #child: ChildProcess | undefined;
+  #childCreated = false;
+  #childCloseObserved = false;
+  #exitCode: number | null = null;
+  #stdoutBytes = 0;
+  #stderrBytes = 0;
+  #stop: Promise<boolean> | undefined;
+  #lastNow: number;
+  #executionTimer: ReturnType<typeof setTimeout> | undefined;
+  readonly #pendingReads = new Set<Promise<unknown>>();
+
+  constructor(token: symbol, sealed: OwnedSealedAuthorization, prepared: OwnedPreparedProduction,
+    snapshots: ProductionGraphGenesisV2SnapshotAuthority, context: OwnedSessionContext,
+    output: OwnedOutputIntent, active: () => boolean) {
+    if (token !== CONCRETE_OWNER || prepared.originalListener === undefined
+      || prepared.originalListener.state !== 'disarmed' || prepared.prepared !== sealed.prepared
+      || sealed.privateExecution !== prepared.privateExecution) fail();
+    this.#sealed = sealed; this.#prepared = prepared; this.#snapshots = snapshots;
+    this.#listener = prepared.originalListener; this.#context = context; this.#output = output; this.#active = active;
+    this.#journal = new ConcreteAuditJournal(CONCRETE_OWNER, sealed, context);
+    this.#lastNow = sealed.sealedAtMonotonicMs;
+    this.#wake = new Promise(resolve => { this.#wakeResolve = resolve; });
+    this.#closed = new Promise(resolve => { this.#closeResolve = resolve; });
+    for (const signal of [context.controller.signal, output.controller.signal, sealed.callerSignal, this.#listener.controller.signal]) {
+      if (signal === undefined) continue;
+      const abort = () => this.#latch('cancelled');
+      signal.addEventListener('abort', abort, { once: true });
+      this.#dispose.push(() => signal.removeEventListener('abort', abort));
+      if (signal.aborted) this.#latch('cancelled');
+    }
+    this.#listener.executionOwned = true;
+    if (this.#listener.lifetime !== undefined) clearTimeout(this.#listener.lifetime);
+    Object.freeze(this);
+  }
+
+  execute(): Promise<DormantV2ConcreteTerminalProof> {
+    if (arguments.length !== 0 || this.#claimed) return Promise.reject(new Error('graph_genesis_v2_production_invalid'));
+    // Claim before the first await; duplicate calls cannot start or finalize a second run.
+    this.#claimed = true;
+    this.#result = this.#run();
+    return this.#result;
+  }
+  stopForRevocation(token: symbol): Promise<DormantV2ConcreteTerminalProof> {
+    if (token !== CONCRETE_OWNER) fail();
+    this.#latch('cancelled');
+    if (!this.#claimed) { this.#claimed = true; this.#result = this.#run(); }
+    return this.#result!;
+  }
+  custodyDrained(token: symbol): Promise<unknown> {
+    if (token !== CONCRETE_OWNER) fail();
+    return Promise.allSettled([...this.#pendingReads]);
+  }
+
+  async #run(): Promise<DormantV2ConcreteTerminalProof> {
+    try {
+      await this.#revalidateBeforeSpawn();
+      this.#phase = 'validated';
+      try { this.#journal.start(); this.#startReturned = true; }
+      catch { this.#startUncertain = true; this.#latch('audit_invalid'); throw new Error('graph_genesis_v2_production_invalid'); }
+      this.#phase = 'started';
+      this.#fence(true);
+      this.#journal.append('graph_genesis_v2_broker_arm_intent', { listenerIdentityDigest: this.#listener.identityDigest });
+      this.#fence(true);
+      if (this.#phase !== 'started' || this.#listener.state !== 'disarmed') fail();
+      this.#listener.state = 'armed'; this.#phase = 'armed';
+      this.#journal.append('graph_genesis_v2_broker_armed', { listenerIdentityDigest: this.#listener.identityDigest });
+      await this.#revalidateBeforeSpawn();
+      this.#journal.append('graph_genesis_v2_spawn_intent', { launchDigest: this.#sealed.privateExecution.launch.launchDigest });
+      this.#fence(true);
+      if (this.#phase !== 'armed') fail();
+      this.#phase = 'spawn-intent'; this.#childAttempted = true;
+      const launch = this.#sealed.privateExecution.launch;
+      try {
+        // No public launch parameters. This exact object was retained in the authenticated private capsule.
+        this.#child = spawn(launch.executable, launch.args, {
+          cwd: launch.cwd, env: { ...launch.env }, shell: false, stdio: ['ignore', 'pipe', 'pipe'], detached: false,
+        });
+      } catch { this.#latch('spawn_failed'); throw new Error('graph_genesis_v2_production_invalid'); }
+      this.#observeChild(this.#child);
+      this.#phase = 'running';
+      if (this.#failure !== undefined) this.#wakeResolve();
+      else {
+        const now = this.#fence(false);
+        this.#executionTimer = setTimeout(() => this.#latch('deadline'), Math.max(1, this.#sealed.executionDeadlineMonotonicMs - now));
+      }
+      await this.#wake;
+      if (this.#failure === undefined) {
+        // Initial empty-workspace/probe validation is deliberately not used after the child.
+        await this.#revalidateAfterChild();
+        this.#latch('completion_unavailable');
+      }
+    } catch { this.#latch('revalidation_failed'); }
+
+    const drained = await this.#stopAndDrain();
+    let status: DormantV2ConcreteTerminalProof['terminalStatus'] =
+      this.#startReturned && (!this.#child || this.#childCloseObserved) && drained
+        ? 'execution_error' : 'outcome_unknown_after_interruption';
+    const summary = Object.freeze<GraphGenesisExecutionSummary>({
+      metadata: { externalReadStatus: 'not_started', requestCount: 0, uniquePackageCount: 0, responseBytes: 0 },
+      process: { status: this.#failure === 'deadline' ? 'timed_out' : this.#failure === 'cancelled' ? 'cancelled'
+        : this.#failure === 'output_overflow' ? 'output_overflow'
+        : this.#childCreated && this.#childCloseObserved && this.#exitCode === 0 ? 'completed' : 'failed',
+        exitCode: this.#childCloseObserved ? this.#exitCode : null, stdoutBytes: this.#stdoutBytes, stderrBytes: this.#stderrBytes },
+      cleanup: { status: 'incomplete' }, terminalAudit: { status: 'unknown' },
+      errorCode: 'graph_genesis_v2_' + (this.#failure ?? 'completion_unavailable'),
+    });
+    // Uncertain start is reconcile-only, even if SQLite actually committed it.
+    if (this.#startReturned && !this.#startUncertain) {
+      try { this.#journal.finalize(summary, status); }
+      catch { /* one attempt only; exact committed receipt may still be independently proven */ }
+    }
+    const journalProven = this.#journal.reconcile(this.#startReturned);
+    const proven = journalProven && this.#pendingReads.size === 0;
+    if (!proven || !this.#startReturned || this.#startUncertain) status = 'outcome_unknown_after_interruption';
+    this.#phase = 'terminal';
+    if (this.#executionTimer !== undefined) clearTimeout(this.#executionTimer);
+    for (const dispose of this.#dispose.splice(0)) dispose();
+    return Object.freeze({
+      terminalStatus: status, actionId: this.#sealed.actionId, childAttempted: this.#childAttempted,
+      childCreated: this.#childCreated, childCloseObserved: this.#childCloseObserved,
+      exitCode: this.#childCloseObserved ? this.#exitCode : null, stdoutBytes: this.#stdoutBytes, stderrBytes: this.#stderrBytes,
+      listenerClosed: drained, reconciliation: proven ? 'proven' : 'unknown',
+    });
+  }
+
+  #latch(code: ConcreteFailure): void {
+    if (this.#failure !== undefined || this.#phase === 'terminal') return;
+    this.#failure = code; this.#abort.abort();
+    // Revoke the output capability now; its descriptor and namespace remain under session custody until settlement.
+    this.#output.controller.abort();
+    this.#wakeResolve();
+  }
+  #fence(startWindow: boolean): number {
+    const now = performance.now();
+    if (!Number.isFinite(now) || Object.is(now, -0) || now < 0 || now > Number.MAX_SAFE_INTEGER || now < this.#lastNow) {
+      this.#latch('clock_invalid'); fail();
+    }
+    this.#lastNow = now;
+    if (now >= this.#sealed.executionDeadlineMonotonicMs || (startWindow && now >= this.#sealed.startByMonotonicMs)) {
+      this.#latch('deadline'); fail();
+    }
+    if (this.#failure !== undefined || this.#abort.signal.aborted || !this.#active()
+      || this.#sealed.callerSignal?.aborted || this.#context.controller.signal.aborted || this.#output.controller.signal.aborted) {
+      this.#latch('cancelled'); fail();
+    }
+    return now;
+  }
+  async #revalidateBeforeSpawn(): Promise<void> {
+    this.#fence(true); this.#journal.verify();
+    const execution = this.#sealed.privateExecution, prepared = this.#sealed.prepared;
+    if (execution !== this.#prepared.privateExecution || digest(execution) !== prepared.plan.executionCapsuleDigest
+      || execution.launch.launchDigest !== prepared.plan.launchDigest || digest(execution.launch.env) !== prepared.plan.environmentDigest
+      || execution.originalListenerIdentityDigest !== this.#listener.identityDigest
+      || prepared.plan.brokerPort !== this.#listener.port) fail();
+    const operation = this.#snapshots.revalidate(this.#prepared.snapshot, {
+      signal: this.#abort.signal, monotonicNow: () => this.#fence(true), deadline: this.#sealed.startByMonotonicMs,
+    });
+    await this.#read(operation, this.#sealed.startByMonotonicMs);
+    this.#fence(true);
+    await this.#read(concreteOutputParent(this.#output), this.#sealed.startByMonotonicMs);
+    this.#fence(true);
+    await this.#read(assertAbsentV2(this.#output.canonicalPath), this.#sealed.startByMonotonicMs);
+    this.#fence(true);
+    this.#journal.verify();
+  }
+  async #revalidateAfterChild(): Promise<void> {
+    this.#fence(false);
+    await this.#read(this.#snapshots.revalidateConcreteImmutable(CONCRETE_OWNER, this.#prepared.snapshot, {
+      signal: this.#abort.signal, monotonicNow: () => this.#fence(false), deadline: this.#sealed.executionDeadlineMonotonicMs,
+    }), this.#sealed.executionDeadlineMonotonicMs);
+    this.#fence(false);
+    await this.#read(concreteOutputParent(this.#output), this.#sealed.executionDeadlineMonotonicMs);
+    this.#fence(false);
+    this.#journal.verify();
+  }
+  #read<T>(operation: Promise<T>, deadline: number): Promise<T> {
+    this.#pendingReads.add(operation);
+    // Cancellation fences forward progress; it cannot cancel an already-issued Node fs read.
+    void operation.then(() => this.#pendingReads.delete(operation), () => this.#pendingReads.delete(operation));
+    return concreteAwait(operation, deadline, this.#abort.signal);
+  }
+  #observeChild(child: ChildProcess): void {
+    child.once('spawn', () => { this.#childCreated = true; });
+    child.on('error', () => this.#latch('process_error'));
+    const count = (stream: 'stdout' | 'stderr', chunk: Buffer | string) => {
+      if (this.#phase === 'terminal') return;
+      const bytes = typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength;
+      const maximum = stream === 'stdout' ? this.#sealed.prepared.plan.limits.stdoutBytes : this.#sealed.prepared.plan.limits.stderrBytes;
+      const total = (stream === 'stdout' ? this.#stdoutBytes : this.#stderrBytes) + bytes;
+      if (stream === 'stdout') this.#stdoutBytes = Math.min(total, maximum); else this.#stderrBytes = Math.min(total, maximum);
+      if (total > maximum) this.#latch('output_overflow');
+    };
+    child.stdout?.on('data', chunk => count('stdout', chunk));
+    child.stderr?.on('data', chunk => count('stderr', chunk));
+    child.once('close', (exitCode: number | null) => {
+      if (this.#childCloseObserved || this.#phase === 'terminal') return;
+      this.#childCloseObserved = true;
+      this.#exitCode = Number.isInteger(exitCode) ? exitCode : null;
+      if (!this.#childCreated || exitCode !== 0) this.#latch('process_error');
+      this.#closeResolve(); this.#wakeResolve();
+    });
+  }
+  #stopAndDrain(): Promise<boolean> {
+    if (this.#stop !== undefined) return this.#stop;
+    this.#phase = 'stopping';
+    if (this.#executionTimer !== undefined) clearTimeout(this.#executionTimer);
+    const stopAt = performance.now();
+    // The grace window is for observation only; it never reopens forward execution.
+    const stopDeadline = Number.isFinite(stopAt) && stopAt >= 0 ? stopAt + 5_000 : 5_000;
+    this.#stop = (async () => {
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const child = this.#child;
+      if (child !== undefined && !this.#childCloseObserved) {
+        try { child.kill('SIGTERM'); } catch { /* retain missing-close uncertainty */ }
+        killTimer = setTimeout(() => {
+          if (!this.#childCloseObserved) try { child.kill('SIGKILL'); } catch { /* observed failure remains unknown */ }
+        }, 2_000);
+      }
+      const drain = closeOriginalListener(this.#listener, stopDeadline);
+      if (child !== undefined && !this.#childCloseObserved) await concreteSettlesWithin(this.#closed, 4_000);
+      if (killTimer !== undefined) clearTimeout(killTimer);
+      return await drain;
+    })();
+    return this.#stop;
+  }
+}
+
+class SessionOwnedDormantMockedExecution {
+  readonly #completion: SessionOwnedSyntheticCompletion;
+  #terminal = false;
+
+  constructor(token: symbol, completion: SessionOwnedSyntheticCompletion) {
+    if (token !== COMPLETION_OWNER) fail();
+    this.#completion = completion;
+    Object.freeze(this);
+  }
+
+  async execute(): Promise<DormantV2MockedTerminalProof> {
+    if (this.#terminal) fail();
+    try {
+      const now = (): number => performance.now();
+      const run = this.#completion.issueSyntheticQuiescedRun(now);
+      const postState = await this.#completion.captureSyntheticPostState(run, now);
+      const artifact = this.#completion.compileSyntheticArtifact(run, postState, now);
+      const reservation = await this.#completion.reserveOutput(run, now);
+      const output = await this.#completion.writeReservedArtifact(run, reservation, artifact, now);
+      const proof = this.#completion.finalizeSyntheticIncomplete(run, output, now);
+      this.#terminal = true;
+      return Object.freeze({ evidenceOrigin: proof.evidenceOrigin, terminalStatus: proof.terminalStatus,
+        actionId: proof.actionId, artifactDigest: proof.artifactDigest });
+    } catch (error) {
+      this.#terminal = true;
+      throw error;
+    }
+  }
+}
+
 function proofIdentity(info: ReturnType<typeof lstatSync>): string {
   if (info === undefined) fail();
   return digest({ device: info.dev, inode: info.ino, owner: info.uid, mode: Number(info.mode) & 0o7777 });
@@ -682,9 +1232,126 @@ function boundedProofRow(db: AuditDatabase, table: 'tool_calls' | 'approvals', i
   return proofRecord(db.prepare('SELECT * FROM ' + table + ' WHERE id=?').get(id));
 }
 
+
+/** Lexical construction owner; no public path, callback, clock or proof creates this capability. */
+class OwnedConcretePreparation {
+  readonly #root: PreparedGraphGenesisV2ConcreteRoot;
+  readonly #seed: AuthenticatedGraphGenesisV2RuntimeSeed;
+  readonly #runtime: GraphGenesisV2RuntimeSeedInput;
+  readonly #context: OwnedSessionContext;
+  readonly #output: OwnedOutputIntent;
+  readonly #listener: OwnedConcreteV2Listener;
+  readonly #controller = new AbortController();
+  readonly #pending = new Set<Promise<unknown>>();
+  readonly #dispose: Array<() => void> = [];
+  readonly #destination: string;
+  #lastNow: number;
+  #revoked = false;
+  #preparing = true;
+  #association: Readonly<{ snapshot: AuthenticatedGraphGenesisV2ProductionSnapshot; bundle: OwnedProductionBundle }> | undefined;
+
+  constructor(token: symbol, root: PreparedGraphGenesisV2ConcreteRoot, seed: AuthenticatedGraphGenesisV2RuntimeSeed,
+    runtime: GraphGenesisV2RuntimeSeedInput, context: OwnedSessionContext, output: OwnedOutputIntent,
+    listener: OwnedConcreteV2Listener, destination: string) {
+    if (token !== CONCRETE_OWNER || listener.context !== context || destination !== join(output.parentCanonicalPath, CONCRETE_WORKSPACE_NAME)) fail();
+    this.#root = root; this.#seed = seed; this.#runtime = runtime; this.#context = context;
+    this.#output = output; this.#listener = listener; this.#destination = destination; this.#lastNow = listener.lastNow;
+    for (const signal of [context.controller.signal, output.controller.signal, listener.controller.signal]) {
+      const revoke = () => this.revoke(CONCRETE_OWNER);
+      signal.addEventListener('abort', revoke, { once: true });
+      this.#dispose.push(() => signal.removeEventListener('abort', revoke));
+      if (signal.aborted) this.#revoked = true;
+    }
+    if (this.#revoked) this.#controller.abort();
+    Object.freeze(this);
+  }
+  runtime(token: symbol): GraphGenesisV2RuntimeSeedInput { this.#token(token); return this.#runtime; }
+  destination(token: symbol): string { this.#token(token); return this.#destination; }
+  port(token: symbol): number { this.#token(token); return this.#listener.port; }
+  signal(token: symbol): AbortSignal { this.#token(token); return this.#controller.signal; }
+  checkpoint(token: symbol): void {
+    this.#token(token);
+    const now = performance.now();
+    if (this.#revoked || this.#controller.signal.aborted || this.#context.controller.signal.aborted
+      || this.#output.controller.signal.aborted || this.#listener.controller.signal.aborted || this.#listener.state !== 'disarmed'
+      || !Number.isFinite(now) || Object.is(now, -0) || now < 0 || now > Number.MAX_SAFE_INTEGER
+      || now < this.#lastNow || now >= this.#listener.deadline
+      || (this.#preparing && !revalidatesExistingGraphGenesisAuditDatabase(this.#context.source))) { this.revoke(token); fail(); }
+    this.#lastNow = now; this.#listener.lastNow = now;
+  }
+  async step<T>(token: symbol, operation: () => Promise<T>): Promise<T> {
+    this.checkpoint(token);
+    // Register the operation synchronously; rejection is observed even after the public await has been cancelled.
+    const promise = operation();
+    this.#pending.add(promise);
+    void promise.then(() => this.#pending.delete(promise), () => this.#pending.delete(promise));
+    const result = await concreteAwait(promise, this.#listener.deadline, this.#controller.signal);
+    this.checkpoint(token); return result;
+  }
+  async checkParent(token: symbol): Promise<void> {
+    await this.step(token, () => concreteOutputParent(this.#output));
+  }
+  async checkDestination(token: symbol): Promise<void> {
+    await this.checkParent(token);
+    const protectedPaths = [
+      ...FILE_KEYS.map(key => this.#runtime.files[key].absolutePath),
+      ...TREE_KEYS.map(key => this.#runtime.trees[key].rootRealpath),
+      this.#context.source.canonicalPath, this.#output.canonicalPath,
+    ];
+    if (protectedPaths.some(path => pathsOverlapConcrete(this.#destination, path))) fail();
+    await this.step(token, () => assertAbsentV2(this.#destination));
+    await this.step(token, () => assertAbsentV2(this.#output.canonicalPath));
+    await this.checkParent(token);
+  }
+  associate(token: symbol, snapshot: AuthenticatedGraphGenesisV2ProductionSnapshot, bundle: OwnedProductionBundle): void {
+    this.checkpoint(token);
+    if (this.#association !== undefined || bundle.workspace.rootRealpath !== this.#destination
+      || bundle.containmentProfile.allowedPort !== this.#listener.port || snapshotBundles.get(snapshot) !== bundle) fail();
+    this.#association = Object.freeze({ snapshot, bundle });
+  }
+  matches(token: symbol, snapshot: AuthenticatedGraphGenesisV2ProductionSnapshot, listener: OwnedConcreteV2Listener,
+    context: OwnedSessionContext, output: OwnedOutputIntent): boolean {
+    this.#token(token);
+    const association = this.#association;
+    return !this.#revoked && !this.#controller.signal.aborted && !context.controller.signal.aborted
+      && !output.controller.signal.aborted && !listener.controller.signal.aborted
+      && this.#listener === listener && this.#context === context && this.#output === output
+      && this.#root.brokerPort === listener.port && object(this.#seed) && association?.snapshot === snapshot
+      && snapshotBundles.get(snapshot) === association.bundle
+      && association.bundle.workspace.rootRealpath === this.#destination
+      && association.bundle.containmentProfile.allowedPort === listener.port;
+  }
+  revoke(token: symbol): void {
+    this.#token(token);
+    if (this.#revoked) return;
+    this.#revoked = true; this.#controller.abort(); this.#association = undefined;
+    for (const dispose of this.#dispose.splice(0)) dispose();
+    this.#output.controller.abort(); this.#listener.controller.abort();
+    if (!this.#listener.executionOwned) void closeOriginalListener(this.#listener, performance.now() + 5_000);
+  }
+  custodyDrained(token: symbol): Promise<unknown> {
+    this.#token(token); return Promise.allSettled([...this.#pending]);
+  }
+  prepared(token: symbol): void {
+    this.checkpoint(token);
+    if (this.#association === undefined || !this.#preparing) fail();
+    this.#preparing = false;
+  }
+  #token(token: symbol): void { if (token !== CONCRETE_OWNER) fail(); }
+}
+function pathsOverlapConcrete(left: string, right: string): boolean {
+  const nested = (parent: string, child: string) => {
+    const part = relative(parent, child);
+    return part === '' || (!part.startsWith('..' + sep) && part !== '..' && !part.startsWith(sep));
+  };
+  return nested(left, right) || nested(right, left);
+}
+
 /** Production-only bridge: it has no raw-digest capture API. */
 export class ProductionGraphGenesisV2SnapshotAuthority {
   readonly #owned = new WeakMap<object, OwnedProductionBundle>();
+  readonly #runtimeSeeds = new WeakMap<object, GraphGenesisV2RuntimeSeedInput>();
+  readonly #claimedSeeds = new WeakSet<object>();
 
   constructor(
     private readonly files: RuntimeFileSnapshotAuthority,
@@ -695,6 +1362,81 @@ export class ProductionGraphGenesisV2SnapshotAuthority {
     private readonly containment: OwnedContainmentProbeAuthority,
     private readonly profiles: SeatbeltLoopbackContainmentAuthority,
   ) {}
+
+
+  captureConcreteRuntimeSeed(input: GraphGenesisV2RuntimeSeedInput): AuthenticatedGraphGenesisV2RuntimeSeed {
+    try {
+      const top = closedRecord(input, ['files', 'trees', 'host', 'runtimeVersions'] as const);
+      const runtime = Object.freeze({
+        files: closedRecord(top.files, FILE_KEYS) as GraphGenesisV2RuntimeSeedInput['files'],
+        trees: closedRecord(top.trees, TREE_KEYS) as GraphGenesisV2RuntimeSeedInput['trees'],
+        host: top.host as AuthenticatedHostPlatformEvidence,
+        runtimeVersions: top.runtimeVersions as AuthenticatedRuntimeVersionEvidence,
+      });
+      this.#assertRuntimeSeed(runtime);
+      const seed = Object.freeze({ runtimeSeedVersion: 1 as const });
+      this.#runtimeSeeds.set(seed, runtime);
+      return seed;
+    } catch { fail(); }
+  }
+
+  claimConcreteRuntimeSeed(token: symbol, seed: AuthenticatedGraphGenesisV2RuntimeSeed): GraphGenesisV2RuntimeSeedInput {
+    if (token !== CONCRETE_OWNER) fail();
+    const runtime = this.#runtimeSeeds.get(seed);
+    if (runtime === undefined || this.#claimedSeeds.has(seed)) fail();
+    this.#assertRuntimeSeed(runtime);
+    this.#claimedSeeds.add(seed);
+    return runtime;
+  }
+
+  async constructConcreteSnapshot(token: symbol, construction: OwnedConcretePreparation): Promise<AuthenticatedGraphGenesisV2ProductionSnapshot> {
+    if (token !== CONCRETE_OWNER || !(construction instanceof OwnedConcretePreparation)) fail();
+    const runtime = construction.runtime(token);
+    const step = <T>(operation: () => Promise<T>) => construction.step(token, operation);
+    this.#assertRuntimeSeed(runtime);
+    await construction.checkDestination(token);
+    for (const key of FILE_KEYS) await step(() => this.files.revalidate(runtime.files[key]));
+    for (const key of TREE_KEYS) await step(() => this.trees.revalidate(runtime.trees[key]));
+    const host = await step(() => this.hosts.observe());
+    if (host.evidenceDigest !== runtime.host.evidenceDigest) fail();
+    const versions = await step(() => this.versions.observe({
+      node: runtime.files.node, npmCli: runtime.files.npmCli, npmTree: runtime.trees.npmTree,
+    }));
+    if (versions.evidenceDigest !== runtime.runtimeVersions.evidenceDigest) fail();
+    await construction.checkDestination(token);
+    construction.checkpoint(token);
+    const profile = this.profiles.prepare({
+      osBuild: runtime.host.osBuild, sandboxExecSha256: runtime.files.sandboxExec.sha256,
+      allowedPort: construction.port(token),
+    });
+    construction.checkpoint(token);
+    const workspace = await step(() => this.workspaces.initialize(construction.destination(token), profile.profileText));
+    await construction.checkParent(token);
+    const containment = await step(() => this.containment.observe({
+      osBuild: runtime.host.osBuild, hostEvidenceDigest: runtime.host.evidenceDigest,
+      nodeSnapshotDigest: runtime.files.node.snapshotDigest, probeSnapshotDigest: runtime.files.probeRuntime.snapshotDigest,
+      sandboxExecSnapshotDigest: runtime.files.sandboxExec.snapshotDigest, workspaceBinding: computeWorkspaceBinding(workspace),
+      profileDigest: profile.profileDigest, allowedPort: construction.port(token),
+    }, profile, { node: runtime.files.node, probe: runtime.files.probeRuntime, sandboxExec: runtime.files.sandboxExec, workspace }));
+    await construction.checkParent(token);
+    construction.checkpoint(token);
+    const snapshot = this.prepare({ ...runtime, workspace, containmentProfile: profile, containment });
+    const bundle = this.#owned.get(snapshot); if (bundle === undefined) fail();
+    construction.associate(token, snapshot, bundle);
+    return snapshot;
+  }
+
+  #assertRuntimeSeed(runtime: GraphGenesisV2RuntimeSeedInput): void {
+    assertFileOwnership(this.files, runtime.files);
+    assertTreeOwnership(this.trees, runtime.trees);
+    assertDistinctRoles(runtime);
+    if (!this.hosts.authenticates(runtime.host, 'local_observed')
+      || !this.versions.authenticates(runtime.runtimeVersions, 'local_observed')) fail();
+    assertStructuralRelationships(runtime);
+    if (runtime.runtimeVersions.nodeSnapshotDigest !== runtime.files.node.snapshotDigest
+      || runtime.runtimeVersions.npmCliSnapshotDigest !== runtime.files.npmCli.snapshotDigest
+      || runtime.runtimeVersions.npmTreeDigest !== runtime.trees.npmTree.treeDigest) fail();
+  }
 
   prepare(input: GraphGenesisV2ConcreteProductionBundle): AuthenticatedGraphGenesisV2ProductionSnapshot {
     try {
@@ -725,6 +1467,17 @@ export class ProductionGraphGenesisV2SnapshotAuthority {
 
   authenticates(value: unknown): value is AuthenticatedGraphGenesisV2ProductionSnapshot {
     return object(value) && this.#owned.has(value);
+  }
+
+  /** Token-gated post-child identity check; mutable npm output is not an initial-empty workspace. */
+  async revalidateConcreteImmutable(token: symbol, value: AuthenticatedGraphGenesisV2ProductionSnapshot,
+    options: GraphGenesisV2RevalidationOptions): Promise<void> {
+    if (token !== CONCRETE_OWNER) fail();
+    const owned = this.#owned.get(value); if (owned === undefined) fail();
+    const guarded = createGuardedAwait(options);
+    for (const key of FILE_KEYS) await guarded(() => this.files.revalidate(owned.files[key]));
+    for (const key of TREE_KEYS) await guarded(() => this.trees.revalidate(owned.trees[key]));
+    await guarded(async () => concreteProtected(owned.workspace));
   }
 
   async revalidate(
@@ -837,6 +1590,12 @@ export class ProductionGraphGenesisV2SessionAuthority {
   readonly #usedContexts = new WeakSet<object>();
   readonly #sealed = new WeakMap<object, OwnedSealedAuthorization>();
   readonly #consumedSealed = new WeakSet<object>();
+  readonly #concreteRoots = new WeakMap<object, OwnedConcreteV2Listener>();
+  readonly #concreteExecutions = new WeakMap<object, SessionOwnedDormantConcreteExecution>();
+  readonly #outputReleases = new WeakMap<object, Promise<void>>();
+  readonly #constructionContexts = new WeakSet<object>();
+  readonly #constructionOutputs = new WeakSet<object>();
+  readonly #constructionDestinations = new Set<string>();
   // Binding and dormant completion share this owner; no live route consumes it.
   readonly #candidates = new ExactGraphCandidateV2Authority();
   readonly #bindings = new GraphGenesisV2BindingAuthority(this.#candidates);
@@ -885,6 +1644,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
         dashboardPort,
         controller,
         outputs: new Set<OwnedOutputIntent>(),
+        listeners: new Set<OwnedConcreteV2Listener>(),
       });
       this.#seenDashboardHandles.add(dashboard);
       this.#activeDashboardInstanceIds.add(dashboard.instanceId);
@@ -932,6 +1692,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
       const publicIntent = Object.freeze({ outputIntentVersion: 1 as const });
       const owned = Object.freeze({
         publicIntent,
+        preparations: new Set<OwnedConcretePreparation>(),
         context,
         canonicalPath: requestedPath,
         parentCanonicalPath,
@@ -959,6 +1720,16 @@ export class ProductionGraphGenesisV2SessionAuthority {
     context: AuthenticatedGraphGenesisV2SessionContext,
     output: AuthenticatedGraphGenesisV2OutputIntent,
   ): Promise<PreparedGraphGenesisV2Production> {
+    return this.#prepare(snapshot, context, output);
+  }
+
+  async #prepare(
+    snapshot: AuthenticatedGraphGenesisV2ProductionSnapshot,
+    context: AuthenticatedGraphGenesisV2SessionContext,
+    output: AuthenticatedGraphGenesisV2OutputIntent,
+    originalListener?: OwnedConcreteV2Listener,
+    construction?: OwnedConcretePreparation,
+  ): Promise<PreparedGraphGenesisV2Production> {
     const bundle = this.#snapshotBundle(snapshot);
     const ownedContext = this.#contexts.get(context);
     const ownedOutput = this.#outputs.get(output);
@@ -966,15 +1737,21 @@ export class ProductionGraphGenesisV2SessionAuthority {
       || ownedContext.controller.signal.aborted || !ownedContext.outputs.has(ownedOutput)) fail();
     this.#assertPolicyIdentity();
     const requestedAt = new Date().toISOString();
-    const deadline = performance.now() + PREPARATION_WINDOW_MS;
+    const deadline = originalListener?.deadline ?? performance.now() + PREPARATION_WINDOW_MS;
     if (!Number.isFinite(deadline) || deadline <= 0 || deadline > Number.MAX_SAFE_INTEGER) fail();
 
-    await this.snapshots.revalidate(snapshot, {
-      signal: ownedContext.controller.signal,
-      monotonicNow: () => performance.now(),
-      deadline,
+    const revalidate = () => this.snapshots.revalidate(snapshot, {
+      signal: construction?.signal(CONCRETE_OWNER) ?? ownedContext.controller.signal,
+      monotonicNow: () => performance.now(), deadline,
     });
-    await this.#revalidateOutput(ownedOutput);
+    if (construction === undefined) {
+      await revalidate(); await this.#revalidateOutput(ownedOutput);
+    } else {
+      if (originalListener === undefined || !construction.matches(CONCRETE_OWNER, snapshot, originalListener, ownedContext, ownedOutput)) fail();
+      await construction.step(CONCRETE_OWNER, revalidate);
+      await construction.step(CONCRETE_OWNER, () => this.#revalidateOutput(ownedOutput));
+      construction.checkpoint(CONCRETE_OWNER);
+    }
     if (this.#contexts.get(context) !== ownedContext || this.#outputs.get(output) !== ownedOutput
       || ownedContext.controller.signal.aborted
       || !revalidatesExistingGraphGenesisAuditDatabase(ownedContext.source)) fail();
@@ -1012,6 +1789,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
       launch,
       runtimePaths,
       dashboardInstanceId: ownedContext.dashboard.instanceId,
+      ...(originalListener === undefined ? {} : { originalListenerIdentityDigest: originalListener.identityDigest }),
     });
     const bound = this.#bindings.prepare({
       plan: {
@@ -1095,8 +1873,67 @@ export class ProductionGraphGenesisV2SessionAuthority {
       output,
       privateBinding: bound.privateBinding,
       privateExecution,
+      ...(originalListener === undefined ? {} : { originalListener }),
+      ...(construction === undefined ? {} : { construction }),
     }));
     return prepared;
+  }
+
+  async prepareConcreteRoot(context: AuthenticatedGraphGenesisV2SessionContext): Promise<PreparedGraphGenesisV2ConcreteRoot> {
+    const owned = this.#contexts.get(context);
+    if (owned === undefined || owned.controller.signal.aborted) fail();
+    const listener = await prepareOriginalListener(owned);
+    if (this.#contexts.get(context) !== owned || owned.controller.signal.aborted) {
+      await closeOriginalListener(listener, performance.now() + 5_000); fail();
+    }
+    const root = Object.freeze({ rootVersion: 2 as const, brokerPort: listener.port });
+    this.#concreteRoots.set(root, listener); return root;
+  }
+
+  async prepareConcrete(
+    root: PreparedGraphGenesisV2ConcreteRoot,
+    seed: AuthenticatedGraphGenesisV2RuntimeSeed,
+    context: AuthenticatedGraphGenesisV2SessionContext,
+    output: AuthenticatedGraphGenesisV2OutputIntent,
+  ): Promise<PreparedGraphGenesisV2Production> {
+    const listener = this.#concreteRoots.get(root);
+    if (listener === undefined) fail();
+    this.#concreteRoots.delete(root);
+    let construction: OwnedConcretePreparation | undefined;
+    try {
+      const ownedContext = this.#contexts.get(context), intent = this.#outputs.get(output);
+      if (arguments.length !== 4 || listener.state !== 'disarmed' || listener.controller.signal.aborted
+        || ownedContext === undefined || intent === undefined || intent.context !== context
+        || ownedContext.controller.signal.aborted || intent.controller.signal.aborted
+        || listener.context !== ownedContext || !ownedContext.outputs.has(intent) || listener.port !== root.brokerPort
+        || this.#constructionContexts.has(context) || this.#constructionOutputs.has(output)
+        || this.#usedContexts.has(context)) fail();
+      const destination = join(intent.parentCanonicalPath, CONCRETE_WORKSPACE_NAME);
+      if (this.#constructionDestinations.has(destination)) fail();
+      const runtime = this.snapshots.claimConcreteRuntimeSeed(CONCRETE_OWNER, seed);
+      // These claims precede every await and construction effect. They are never reset or retried.
+      this.#constructionContexts.add(context); this.#constructionOutputs.add(output);
+      this.#constructionDestinations.add(destination);
+      construction = new OwnedConcretePreparation(CONCRETE_OWNER, root, seed, runtime, ownedContext, intent, listener, destination);
+      intent.preparations.add(construction);
+      const snapshot = await this.snapshots.constructConcreteSnapshot(CONCRETE_OWNER, construction);
+      construction.checkpoint(CONCRETE_OWNER);
+      const prepared = await this.#prepare(snapshot, context, output, listener, construction);
+      construction.checkpoint(CONCRETE_OWNER);
+      if (!this.authenticatesPrepared(prepared)) fail();
+      construction.prepared(CONCRETE_OWNER);
+      return prepared;
+    } catch {
+      construction?.revoke(CONCRETE_OWNER);
+      await closeOriginalListener(listener, performance.now() + 5_000); fail();
+    }
+  }
+
+  #authenticatesConstruction(owned: OwnedPreparedProduction): boolean {
+    if (owned.originalListener === undefined) return owned.construction === undefined;
+    const context = this.#contexts.get(owned.context), output = this.#outputs.get(owned.output);
+    return context !== undefined && output !== undefined && owned.construction !== undefined
+      && owned.construction.matches(CONCRETE_OWNER, owned.snapshot, owned.originalListener, context, output);
   }
 
   authenticatesPrepared(value: unknown): value is PreparedGraphGenesisV2Production {
@@ -1108,6 +1945,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
       && this.#contexts.has(owned.context)
       && this.#outputs.has(owned.output)
       && this.snapshots.authenticates(owned.snapshot)
+      && this.#authenticatesConstruction(owned)
       && this.#bindings.authenticatesPair(
         owned.prepared.plan,
         owned.prepared.projection,
@@ -1125,9 +1963,12 @@ export class ProductionGraphGenesisV2SessionAuthority {
     let approvalRecorded = false;
     let approvalResolved = false;
     let signalLink: LinkedAuthorizationSignal | undefined;
+    let listenerLink: LinkedAuthorizationSignal | undefined;
+    let originalListener: OwnedConcreteV2Listener | undefined;
     try {
       const callerSignal = authorizationSignal(options);
       const owned = this.#ownedPrepared(prepared);
+      originalListener = owned.originalListener;
       if (this.#usedPrepared.has(prepared) || this.#usedContexts.has(owned.context)) fail();
       const context = this.#contexts.get(owned.context);
       const output = this.#outputs.get(owned.output);
@@ -1135,8 +1976,15 @@ export class ProductionGraphGenesisV2SessionAuthority {
         || !context.outputs.has(output)) fail();
       this.#usedPrepared.add(prepared);
       this.#usedContexts.add(owned.context);
-      signalLink = linkAuthorizationSignals(context.controller.signal, callerSignal);
-      const fence = createLifecycleFence(prepared.envelope, signalLink.signal);
+      listenerLink = originalListener === undefined ? undefined
+        : linkAuthorizationSignals(originalListener.controller.signal, callerSignal);
+      signalLink = linkAuthorizationSignals(context.controller.signal, listenerLink?.signal ?? callerSignal);
+      const lifecycleFence = createLifecycleFence(prepared.envelope, signalLink.signal);
+      const fence = (expiresAt?: string) => {
+        if (!this.#authenticatesConstruction(owned)) fail();
+        owned.construction?.checkpoint(CONCRETE_OWNER);
+        return lifecycleFence(expiresAt);
+      };
       fence();
       if (!revalidatesExistingGraphGenesisAuditDatabase(context.source)) fail();
       const checkpoint = captureInitialAuditCheckpoint(context.source);
@@ -1229,6 +2077,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
           blocked,
           'authorization_receipt_finalized',
         ]);
+        if (originalListener !== undefined) await closeOriginalListener(originalListener, performance.now() + 5_000);
         return Object.freeze({ status: outcome, actionId: audit.actionId });
       }
 
@@ -1307,9 +2156,12 @@ export class ProductionGraphGenesisV2SessionAuthority {
         actionId: audit.actionId,
         approvalId: activeTicket.request.id,
         startByMonotonicMs,
-        executionDeadlineMonotonicMs: startByMonotonicMs + EXECUTION_WINDOW_MS,
+        sealedAtMonotonicMs,
+        executionDeadlineMonotonicMs: originalListener === undefined ? startByMonotonicMs + EXECUTION_WINDOW_MS
+          : decisionMonotonicMs + EXECUTION_WINDOW_MS,
         privateExecution: owned.privateExecution,
         ...(callerSignal === undefined ? {} : { callerSignal }),
+        ...(originalListener === undefined ? {} : { concreteAudit: captureConcreteAuditSnapshot(context.source, audit.actionId, activeTicket.request.id) }),
       }));
       return Object.freeze({ status: 'authorized' as const, actionId: audit.actionId, sealedAuthorization: sealed });
     } catch {
@@ -1332,8 +2184,10 @@ export class ProductionGraphGenesisV2SessionAuthority {
           // A failed audit sink cannot be repaired or treated as authorization.
         }
       }
+      if (originalListener !== undefined) await closeOriginalListener(originalListener, performance.now() + 5_000);
       return fail();
     } finally {
+      listenerLink?.dispose();
       signalLink?.dispose();
     }
   }
@@ -1348,6 +2202,9 @@ export class ProductionGraphGenesisV2SessionAuthority {
       && owned.prepared === prepared
       && this.#contexts.has(owned.context)
       && this.#outputs.has(owned.output)
+      && !this.#contexts.get(owned.context)!.controller.signal.aborted
+      && !this.#outputs.get(owned.output)!.controller.signal.aborted
+      && !owned.callerSignal?.aborted
       && this.#usedPrepared.has(prepared)
       && this.#usedContexts.has(owned.context);
   }
@@ -1379,6 +2236,52 @@ export class ProductionGraphGenesisV2SessionAuthority {
     );
   }
 
+  /** Closed test-only handoff: callers receive one opaque terminal operation. */
+  createDormantMockedExecution(
+    prepared: PreparedGraphGenesisV2Production,
+    sealed: AuthenticatedGraphGenesisV2SealedAuthorization,
+  ): DormantV2MockedExecution {
+    const owned = this.#sealed.get(sealed);
+    const preparedOwned = this.#ownedPrepared(prepared);
+    const context = owned === undefined ? undefined : this.#contexts.get(owned.context);
+    const output = owned === undefined ? undefined : this.#outputs.get(owned.output);
+    if (owned === undefined || owned.prepared !== prepared || this.#consumedSealed.has(sealed)
+      || context === undefined || output === undefined || output.context !== owned.context
+      || context.controller.signal.aborted || !context.outputs.has(output)
+      || digest(owned.privateExecution) !== prepared.plan.executionCapsuleDigest) fail();
+    this.#consumedSealed.add(sealed);
+    return new SessionOwnedDormantMockedExecution(COMPLETION_OWNER,
+      new SessionOwnedSyntheticCompletion(COMPLETION_OWNER, owned, context, output,
+        this.#snapshotBundle(preparedOwned.snapshot).workspace, this.#candidates, owned.privateExecution, () =>
+          this.#contexts.get(owned.context) === context
+          && this.#outputs.get(owned.output) === output
+          && context.outputs.has(output)));
+  }
+
+  createDormantConcreteExecution(
+    prepared: PreparedGraphGenesisV2Production,
+    sealed: AuthenticatedGraphGenesisV2SealedAuthorization,
+  ): DormantV2ConcreteExecution {
+    const owned = this.#sealed.get(sealed);
+    const preparedOwned = this.#ownedPrepared(prepared);
+    const context = owned === undefined ? undefined : this.#contexts.get(owned.context);
+    const output = owned === undefined ? undefined : this.#outputs.get(owned.output);
+    const listener = preparedOwned.originalListener;
+    if (owned === undefined || owned.prepared !== prepared || this.#consumedSealed.has(sealed)
+      || context === undefined || output === undefined || listener === undefined || listener.state !== 'disarmed'
+      || listener.port !== prepared.plan.brokerPort || listener.controller.signal.aborted
+      || owned.privateExecution.originalListenerIdentityDigest !== listener.identityDigest
+      || output.controller.signal.aborted || output.context !== owned.context
+      || context.controller.signal.aborted || !context.outputs.has(output)
+      || digest(owned.privateExecution) !== prepared.plan.executionCapsuleDigest) fail();
+    this.#consumedSealed.add(sealed);
+    const execution = new SessionOwnedDormantConcreteExecution(CONCRETE_OWNER, owned, preparedOwned, this.snapshots, context, output, () =>
+      this.#contexts.get(owned.context) === context && this.#outputs.get(owned.output) === output
+      && context.outputs.has(output));
+    this.#concreteExecutions.set(output.publicIntent, execution);
+    return execution;
+  }
+
   async revalidateSnapshot(
     snapshot: AuthenticatedGraphGenesisV2ProductionSnapshot,
     options: GraphGenesisV2RevalidationOptions,
@@ -1391,14 +2294,14 @@ export class ProductionGraphGenesisV2SessionAuthority {
     const owned = this.#outputs.get(output);
     if (owned === undefined) fail();
     this.#outputs.delete(output);
-    this.#contexts.get(owned.context)?.outputs.delete(owned);
-    this.#activeOutputPaths.delete(owned.canonicalPath);
     owned.controller.abort();
-    try {
-      await owned.descriptor.close();
-    } catch {
-      fail();
-    }
+    // Keep namespace and descriptor custody until the single concrete owner has stopped and reconciled.
+    await this.#concreteExecutions.get(output)?.stopForRevocation(CONCRETE_OWNER);
+    const context = this.#contexts.get(owned.context);
+    const listeners = [...(context?.listeners ?? [])].filter(listener => !listener.executionOwned);
+    await Promise.all(listeners.map(listener => closeOriginalListener(listener, performance.now() + 5_000)));
+    context?.outputs.delete(owned);
+    if (!await concreteSettlesWithin(this.#releaseOutputCustody(owned), 5_000)) fail();
   }
 
   async closeContext(context: AuthenticatedGraphGenesisV2SessionContext): Promise<void> {
@@ -1407,19 +2310,37 @@ export class ProductionGraphGenesisV2SessionAuthority {
     this.#contexts.delete(context);
     owned.controller.abort();
     const descriptors = [...owned.outputs];
-    owned.outputs.clear();
     for (const output of descriptors) {
       this.#outputs.delete(output.publicIntent);
-      this.#activeOutputPaths.delete(output.canonicalPath);
+      output.controller.abort();
     }
-    this.#activeDashboardInstanceIds.delete(owned.dashboard.instanceId);
-    this.#activeDashboardPorts.delete(owned.dashboardPort);
     owned.approvals.close();
+    await Promise.all(descriptors.map(output => this.#concreteExecutions.get(output.publicIntent)?.stopForRevocation(CONCRETE_OWNER)));
+    await Promise.all([...owned.listeners].map(listener => closeOriginalListener(listener, performance.now() + 5_000)));
     const results = await Promise.allSettled([
-      ...descriptors.map((output) => output.descriptor.close()),
+      ...descriptors.map(async output => {
+        if (!await concreteSettlesWithin(this.#releaseOutputCustody(output), 5_000)) fail();
+      }),
       owned.dashboard.close(),
     ]);
-    if (results.some((result) => result.status === 'rejected')) fail();
+    owned.outputs.clear();
+    this.#activeDashboardInstanceIds.delete(owned.dashboard.instanceId);
+    this.#activeDashboardPorts.delete(owned.dashboardPort);
+    if (results.some(result => result.status === 'rejected')) fail();
+  }
+
+  #releaseOutputCustody(output: OwnedOutputIntent): Promise<void> {
+    const existing = this.#outputReleases.get(output.publicIntent);
+    if (existing !== undefined) return existing;
+    const release = Promise.resolve().then(async () => {
+      await Promise.all([...output.preparations].map(preparation => preparation.custodyDrained(CONCRETE_OWNER)));
+      await this.#concreteExecutions.get(output.publicIntent)?.custodyDrained(CONCRETE_OWNER);
+      await output.descriptor.close();
+      this.#activeOutputPaths.delete(output.canonicalPath);
+    });
+    this.#outputReleases.set(output.publicIntent, release);
+    void release.catch(() => {});
+    return release;
   }
 
   #snapshotBundle(snapshot: AuthenticatedGraphGenesisV2ProductionSnapshot): OwnedProductionBundle {
@@ -1834,7 +2755,7 @@ function assertTreeOwnership(
   }
 }
 
-function assertDistinctRoles(input: OwnedProductionBundle): void {
+function assertDistinctRoles(input: GraphGenesisV2RuntimeSeedInput): void {
   const values: object[] = [
     ...FILE_KEYS.map((key) => input.files[key]),
     ...TREE_KEYS.map((key) => input.trees[key]),
@@ -1851,7 +2772,7 @@ function assertDistinctRoles(input: OwnedProductionBundle): void {
     || new Set(treeRoots).size !== treeRoots.length) fail();
 }
 
-function assertStructuralRelationships(input: OwnedProductionBundle): void {
+function assertStructuralRelationships(input: GraphGenesisV2RuntimeSeedInput): void {
   if (input.files.npmCli.absolutePath !== join(input.trees.npmTree.rootRealpath, 'bin', 'npm-cli.js')
     || !treeHasRelativeFile(input.trees.npmTree, 'package.json')
     || !treeBindsFile(input.trees.npmTree, input.files.npmCli)
@@ -2003,6 +2924,134 @@ function sameV2File(
 
 function currentUserV2(fallback: number): number {
   return typeof process.geteuid === 'function' ? process.geteuid() : fallback;
+}
+
+
+/** A cooperative timer fence observes rejection immediately and removes its own timer/listener on every path. */
+function concreteAwait<T>(operation: Promise<T>, deadline: number, signal?: AbortSignal): Promise<T> {
+  return new Promise<T>((resolveValue, rejectValue) => {
+    let settled = false;
+    const finish = (error: boolean, value?: T) => {
+      if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener('abort', aborted);
+      if (error) rejectValue(new Error('graph_genesis_v2_production_invalid')); else resolveValue(value!);
+    };
+    const aborted = () => finish(true);
+    const now = performance.now();
+    const remaining = Math.max(0, deadline - now);
+    const timer = setTimeout(() => finish(true), Number.isFinite(remaining) ? remaining : 0);
+    operation.then(value => finish(false, value), () => finish(true));
+    signal?.addEventListener('abort', aborted, { once: true });
+    if (signal?.aborted || !Number.isFinite(now) || now < 0 || now >= deadline) finish(true);
+  });
+}
+function concreteSettlesWithin(operation: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  return new Promise(resolveValue => {
+    let settled = false;
+    const finish = (value: boolean) => { if (settled) return; settled = true; clearTimeout(timer); resolveValue(value); };
+    const timer = setTimeout(() => finish(false), Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : 0);
+    operation.then(() => finish(true), () => finish(false));
+  });
+}
+async function concreteOutputParent(output: OwnedOutputIntent): Promise<void> {
+  const descriptor = await output.descriptor.stat(), linked = await lstat(output.parentCanonicalPath);
+  if (!matchesOwnedDirectory(descriptor, output) || !matchesOwnedDirectory(linked, output)
+    || await realpath(output.parentCanonicalPath) !== output.parentCanonicalPath) fail();
+}
+function concreteProtected(workspace: GraphGenesisWorkspace): void {
+  const root = lstatSync(workspace.rootRealpath);
+  if (!root.isDirectory() || root.isSymbolicLink() || root.dev !== workspace.device || root.ino !== workspace.inode
+    || root.uid !== workspace.owner || (root.mode & 0o7777) !== workspace.mode) fail();
+  for (const item of workspace.protectedFiles) {
+    const path = join(workspace.rootRealpath, item.name);
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const before = fstatSync(fd);
+      if (!before.isFile() || before.nlink !== 1 || before.uid !== workspace.owner || before.dev !== item.device
+        || before.ino !== item.inode || (before.mode & 0o7777) !== item.mode || before.size !== item.size
+        || item.size > 64 * 1024) fail();
+      const bytes = Buffer.alloc(item.size + 1); let offset = 0;
+      while (offset < bytes.length) { const n = readSync(fd, bytes, offset, bytes.length - offset, offset); if (!n) break; offset += n; }
+      if (offset !== item.size || createHash('sha256').update(bytes.subarray(0, offset)).digest('hex') !== item.sha256
+        || proofFileIdentity(fstatSync(fd)) !== proofFileIdentity(before)
+        || proofFileIdentity(lstatSync(path)) !== proofFileIdentity(before)) fail();
+    } finally { closeSync(fd); }
+  }
+}
+
+async function prepareOriginalListener(context: OwnedSessionContext): Promise<OwnedConcreteV2Listener> {
+  const createdAt = performance.now();
+  if (!Number.isFinite(createdAt) || Object.is(createdAt, -0) || createdAt < 0 || createdAt > Number.MAX_SAFE_INTEGER - PREPARATION_WINDOW_MS
+    || context.controller.signal.aborted) fail();
+  let listener!: OwnedConcreteV2Listener;
+  const server = createServer((_request, response) => {
+    // Metadata transport is not connected in the failure-lifecycle unit. An armed request fails the run closed.
+    if (listener.state === 'armed') listener.controller.abort();
+    response.statusCode = 503; response.end();
+  });
+  listener = {
+    server, port: 0, identityDigest: '', state: 'disarmed', controller: new AbortController(), context,
+    deadline: createdAt + PREPARATION_WINDOW_MS, lastNow: createdAt,
+    executionOwned: false, closePromise: undefined, lifetime: undefined, detached: () => {},
+  };
+  const revoke = () => {
+    listener.controller.abort();
+    if (!listener.executionOwned) void closeOriginalListener(listener, performance.now() + 5_000);
+  };
+  context.listeners.add(listener);
+  context.controller.signal.addEventListener('abort', revoke, { once: true });
+  server.on('error', revoke);
+  listener.detached = () => context.controller.signal.removeEventListener('abort', revoke);
+  listener.lifetime = setTimeout(revoke, PREPARATION_WINDOW_MS);
+  try {
+    await concreteAwait(new Promise<void>((resolveListen, rejectListen) => {
+      server.once('error', rejectListen);
+      server.listen(0, '127.0.0.1', () => { server.removeListener('error', rejectListen); resolveListen(); });
+    }), listener.deadline, context.controller.signal);
+    const address = server.address();
+    if (context.controller.signal.aborted || listener.controller.signal.aborted || listener.state !== 'disarmed'
+      || address === null || typeof address === 'string' || address.address !== '127.0.0.1'
+      || !Number.isSafeInteger(address.port) || address.port < 1024 || address.port > 65_535) fail();
+    listener.port = address.port;
+    // This nonce identifies this server instance; equal ports never authenticate a replacement.
+    listener.identityDigest = digest({ nonce: randomBytes(32).toString('hex'), address: address.address, port: address.port });
+    return listener;
+  } catch {
+    await closeOriginalListener(listener, performance.now() + 5_000);
+    fail();
+  }
+}
+
+function closeOriginalListener(listener: OwnedConcreteV2Listener, deadline: number): Promise<boolean> {
+  if (listener.closePromise !== undefined) return listener.closePromise;
+  listener.state = 'drained';
+  if (listener.lifetime !== undefined) clearTimeout(listener.lifetime);
+  listener.detached();
+  // Publish the one shared promise before invoking callbacks that can reenter.
+  listener.closePromise = Promise.resolve().then(async () => {
+    const remaining = () => {
+      const left = deadline - performance.now();
+      return Number.isFinite(left) ? Math.max(0, Math.min(5_000, left)) : 0;
+    };
+    let connections = -1;
+    const counted = await concreteSettlesWithin(new Promise<void>((resolveCount, rejectCount) => {
+      try {
+        listener.server.getConnections((error, count) => { if (error) rejectCount(error); else { connections = count; resolveCount(); } });
+      } catch (error) { rejectCount(error); }
+    }), Math.min(1_000, remaining()));
+    const closed = await concreteSettlesWithin(new Promise<void>((resolveClose, rejectClose) => {
+      try {
+        listener.server.close(error => {
+          if (error !== undefined && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') rejectClose(error);
+          else resolveClose();
+        });
+        if (connections > 0 || !counted) listener.server.closeAllConnections();
+      } catch (error) { rejectClose(error); }
+    }), remaining());
+    listener.state = closed ? 'closed' : 'drained';
+    listener.context.listeners.delete(listener);
+    return counted && connections === 0 && closed;
+  });
+  return listener.closePromise;
 }
 
 function object(value: unknown): value is object {
