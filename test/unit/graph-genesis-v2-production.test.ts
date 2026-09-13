@@ -1217,6 +1217,30 @@ describeMac('Graph Genesis v2 durable approval lifecycle (macOS disposable SQLit
     expect(() => fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization)).toThrow(INVALID);
   });
 
+  it('records dispatch before its internally owned fake broker/child/listener quiescence without publishing listener authority', async () => {
+    const fixture = await createPreparationFixture();
+    const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);
+    const pending = fixture.sessions.authorize(prepared);
+    const request = await waitForGraphApproval(fixture);
+    expect(dashboardApprovals(fixture).decide(request.id, 'approved')).toBe('approved');
+    const authorized = await pending;
+    if (authorized.status !== 'authorized') throw new Error('Expected sealed authorization');
+    const completion = fixture.sessions.createSyntheticCompletion(prepared, authorized.sealedAuthorization);
+
+    completion.issueSyntheticQuiescedRun(() => 1);
+    const rows = fixture.source.database.prepare(`
+      SELECT event_type,event_json FROM audit_events WHERE tool_call_id=? ORDER BY sequence
+    `).all(authorized.actionId) as Array<{ event_type: string; event_json: string }>;
+    const started = rows.findIndex((row) => row.event_type === 'execution_start_recorded');
+    const quiesced = rows.findIndex((row) => row.event_type === 'graph_genesis_v2_synthetic_quiesced_fixture');
+    expect(started).toBeGreaterThanOrEqual(0);
+    expect(quiesced).toBeGreaterThan(started);
+    const details = JSON.parse(rows[quiesced]!.event_json).details;
+    expect(details.quiescence).toEqual({ childCloseObserved: true, exitCode: 0, requestCount: 0, responseBytes: 0 });
+    expect(JSON.stringify(details)).not.toContain('listenerIdentityDigest');
+    expect(JSON.stringify(details)).not.toContain('brokerPort');
+  });
+
   it('revokes a session-owned synthetic completion on context close before any forward effect', async () => {
     const fixture = await createPreparationFixture();
     const prepared = await fixture.sessions.prepare(fixture.snapshot, fixture.context, fixture.output);

@@ -39,6 +39,10 @@ import {
   type GraphGenesisCandidateArtifactV2Binding,
 } from './graph-genesis-candidate-artifact-v2.js';
 import { SyntheticPostStateV2Authority, type SyntheticPostStateV2 } from './graph-genesis-v2-post-state.js';
+import {
+  SyntheticGraphGenesisV2ExecutionAuthority,
+  type SyntheticGraphGenesisV2Run,
+} from './graph-genesis-v2-execution.js';
 import { parseStrictJsonDocument } from './graph-genesis-broker.js';
 import {
   COMPILATION_CONTRACT_DIGEST,
@@ -203,6 +207,7 @@ type OwnedPreparedProduction = Readonly<{
   context: AuthenticatedGraphGenesisV2SessionContext;
   output: AuthenticatedGraphGenesisV2OutputIntent;
   privateBinding: object;
+  privateExecution: object;
 }>;
 
 type OwnedSealedAuthorization = Readonly<{
@@ -215,6 +220,7 @@ type OwnedSealedAuthorization = Readonly<{
   approvalId: string;
   startByMonotonicMs: number;
   executionDeadlineMonotonicMs: number;
+  privateExecution: object;
   callerSignal?: AbortSignal;
 }>;
 
@@ -276,6 +282,9 @@ class SessionOwnedSyntheticCompletion {
   readonly #reservations = new WeakMap<object, SyntheticQuiescedRunV2>();
   readonly #outputs = new WeakMap<object, GraphGenesisCandidateArtifactV2>();
   readonly #postStates = new SyntheticPostStateV2Authority();
+  readonly #execution = new SyntheticGraphGenesisV2ExecutionAuthority();
+  readonly #executionRuns = new WeakMap<object, SyntheticGraphGenesisV2Run>();
+  readonly #privateExecutionDigest: string;
   #runValue: SyntheticQuiescedRunV2 | undefined;
   #lastNow: number | undefined;
   #phase: 'new' | 'issued' | 'captured' | 'compiled' | 'reserved' | 'written' | 'terminal' = 'new';
@@ -289,10 +298,12 @@ class SessionOwnedSyntheticCompletion {
 
   constructor(token: symbol, sealed: OwnedSealedAuthorization, context: OwnedSessionContext,
     output: OwnedOutputIntent, workspace: GraphGenesisWorkspace, candidates: ExactGraphCandidateV2Authority,
-    active: () => boolean) {
+    privateExecution: object, active: () => boolean) {
     if (token !== COMPLETION_OWNER) fail();
     this.#sealed = sealed; this.#context = context; this.#output = output;
     this.#workspace = workspace; this.#candidates = candidates; this.#active = active;
+    this.#privateExecutionDigest = digest(privateExecution);
+    if (this.#privateExecutionDigest !== sealed.prepared.plan.executionCapsuleDigest) fail();
     this.#parentIdentity = proofIdentity(lstatSync(dirname(context.source.canonicalPath)));
     this.#checkSourcePath();
     // Snapshot the already durable owner-created authorization, not caller-supplied rows.
@@ -311,17 +322,36 @@ class SessionOwnedSyntheticCompletion {
 
   issueSyntheticQuiescedRun(now: () => number): SyntheticQuiescedRunV2 {
     return this.#sync(() => {
-      this.#fence(now); if (this.#phase !== 'new') fail();
+      const at = this.#fence(now); if (this.#phase !== 'new') fail();
       const run = Object.freeze({ actionId: this.#sealed.actionId, approvalId: this.#sealed.approvalId,
         planHash: this.#sealed.prepared.plan.planHash, executionEnvelopeHash: this.#sealed.prepared.envelope.executionEnvelopeHash });
-      // The single owner also handles a throw after a possibly committed start.
+      const binding = Object.freeze({
+        actionId: run.actionId, approvalId: run.approvalId, planHash: run.planHash,
+        executionEnvelopeHash: run.executionEnvelopeHash,
+        listenerProfileDigest: this.#sealed.prepared.plan.containmentProfileDigest,
+        routeDigest: this.#sealed.prepared.plan.routeTokenDigest,
+        capsuleDigest: this.#privateExecutionDigest,
+      });
+      const listener = this.#execution.prepareListener(binding, this.#sealed.prepared.plan.brokerPort);
+      const executionRun = this.#execution.reserve(binding, listener, at, this.#sealed.startByMonotonicMs,
+        this.#sealed.executionDeadlineMonotonicMs);
+      // Durable dispatch is recorded before this fixture models broker/child ordering.
       this.#started = true;
       this.#sealed.audit.markExecutionStarted();
+      this.#execution.markExecutionStarted(executionRun, at);
+      this.#execution.recordBrokerIntent(executionRun, at);
+      this.#execution.commitBrokerArm(executionRun, at);
+      this.#execution.recordSpawnAttempt(executionRun, at);
+      this.#execution.observeChildClose(executionRun, at, 0);
+      this.#execution.observeListenerQuiesced(executionRun, listener, at);
+      const quiescence = this.#execution.quiesce(executionRun, at);
       this.#append('graph_genesis_v2_synthetic_quiesced_fixture', {
         evidenceOrigin: 'synthetic_fixture', planHash: run.planHash, executionEnvelopeHash: run.executionEnvelopeHash,
+        quiescence: { childCloseObserved: quiescence.childCloseObserved, exitCode: quiescence.exitCode,
+          requestCount: quiescence.requestCount, responseBytes: quiescence.responseBytes },
         unavailableEvidence: syntheticUnavailableEvidenceV2(run.actionId),
       });
-      this.#runs.add(run); this.#runValue = run; this.#phase = 'issued';
+      this.#runs.add(run); this.#executionRuns.set(run, executionRun); this.#runValue = run; this.#phase = 'issued';
       return run;
     });
   }
@@ -500,9 +530,9 @@ class SessionOwnedSyntheticCompletion {
   }
 
   #run(run: SyntheticQuiescedRunV2, now: () => number): void {
-    if (run !== this.#runValue || !this.#runs.has(run)) fail(); this.#fence(now);
+    if (run !== this.#runValue || !this.#runs.has(run) || this.#executionRuns.get(run) === undefined) fail(); this.#fence(now);
   }
-  #fence(now: () => number): void {
+  #fence(now: () => number): number {
     if (this.#terminalAttempted || !this.#active() || this.#context.controller.signal.aborted || this.#output.controller.signal.aborted || this.#sealed.callerSignal?.aborted) fail();
     const value = now();
     // The caller's clock may synchronously revoke/re-enter the owner.
@@ -511,6 +541,7 @@ class SessionOwnedSyntheticCompletion {
       || (this.#phase === 'new' && value >= this.#sealed.startByMonotonicMs)
       || (this.#lastNow !== undefined && value < this.#lastNow)) fail();
     this.#lastNow = value;
+    return value;
   }
   #binding(run: SyntheticQuiescedRunV2, post: SyntheticPostStateV2): GraphGenesisCandidateArtifactV2Binding {
     const plan = this.#sealed.prepared.plan; const envelope = this.#sealed.prepared.envelope;
@@ -1063,6 +1094,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
       context,
       output,
       privateBinding: bound.privateBinding,
+      privateExecution,
     }));
     return prepared;
   }
@@ -1276,6 +1308,7 @@ export class ProductionGraphGenesisV2SessionAuthority {
         approvalId: activeTicket.request.id,
         startByMonotonicMs,
         executionDeadlineMonotonicMs: startByMonotonicMs + EXECUTION_WINDOW_MS,
+        privateExecution: owned.privateExecution,
         ...(callerSignal === undefined ? {} : { callerSignal }),
       }));
       return Object.freeze({ status: 'authorized' as const, actionId: audit.actionId, sealedAuthorization: sealed });
@@ -1333,11 +1366,13 @@ export class ProductionGraphGenesisV2SessionAuthority {
     const context = owned === undefined ? undefined : this.#contexts.get(owned.context);
     const output = owned === undefined ? undefined : this.#outputs.get(owned.output);
     const bundle = this.#snapshotBundle(preparedOwned.snapshot);
-    if (owned === undefined || owned.prepared !== prepared || this.#consumedSealed.has(sealed)
+    if (owned === undefined || owned.prepared !== prepared || digest(owned.privateExecution) !== prepared.plan.executionCapsuleDigest
+      || this.#consumedSealed.has(sealed)
       || context === undefined || output === undefined || output.context !== owned.context
       || context.controller.signal.aborted || !context.outputs.has(output)) fail();
     this.#consumedSealed.add(sealed);
-    return new SessionOwnedSyntheticCompletion(COMPLETION_OWNER, owned, context, output, bundle.workspace, this.#candidates, () =>
+    return new SessionOwnedSyntheticCompletion(COMPLETION_OWNER, owned, context, output, bundle.workspace, this.#candidates,
+      owned.privateExecution, () =>
       this.#contexts.get(owned.context) === context
       && this.#outputs.get(owned.output) === output
       && context.outputs.has(output),
